@@ -73,10 +73,11 @@ test.describe("acceptance", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /understand your next customer/ })).toBeVisible();
-    await expect(page.locator(".traveler").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Change the context/ })).toBeVisible();
+    await expect(page.locator(".rail-word").first()).toBeVisible();
     await page.getByTestId("cta-demo").click();
     await page.getByTestId("preset-concierge").click();
+    await page.getByTestId("demo-continue").click();
     await page.getByTestId("favorite-name-0").fill("Spirited Away");
     await page.getByTestId("run-audit").click();
     await expect(page.getByTestId("stage-evidence-check")).toHaveText("failed");
@@ -97,7 +98,8 @@ test.describe("acceptance", () => {
     await expect(page.getByTestId("results-empty")).toBeVisible();
     await page.goto("/demo");
     await page.reload();
-    await expect(page.getByTestId("favorite-name-0")).toHaveValue("");
+    await expect(page.getByTestId("favorite-name-0")).toHaveCount(0);
+    await expect(page.getByTestId("preset-concierge")).toHaveAttribute("aria-pressed", "false");
   });
 
   test("resets a cancelled run and imports a downloaded file as imported evidence", async ({ page }) => {
