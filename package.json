@@ -1,0 +1,36 @@
+{
+  "name": "tasteaudit",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Session-based audits of whether an AI assistant recommends things that fit a customer's explicit cultural interests.",
+  "license": "MIT",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "test:browser": "playwright test",
+    "smoke": "tsx scripts/smoke.ts"
+  },
+  "dependencies": {
+    "@google/genai": "1.22.0",
+    "next": "15.5.28",
+    "plotly.js-dist-min": "2.35.3",
+    "react": "19.1.1",
+    "react-dom": "19.1.1",
+    "zod": "3.25.76"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.56.1",
+    "@types/node": "22.18.8",
+    "@types/react": "19.1.16",
+    "@types/react-dom": "19.1.9",
+    "eslint": "9.36.0",
+    "eslint-config-next": "15.5.28",
+    "tsx": "4.20.5",
+    "typescript": "5.9.2",
+    "vitest": "3.2.4"
+  }
+}
