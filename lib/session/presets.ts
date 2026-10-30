@@ -2,6 +2,13 @@ import type { ConfigPatch } from "@/lib/session/state";
 
 export type DemoPresetId = "concierge" | "bookseller";
 
+export const DEMO_PLACE_CITIES = ["Lisbon", "New York", "Kuala Lumpur", "Osaka"] as const;
+export const DEMO_BOOK_CITIES = ["Chicago", "London", "Toronto", "Mexico City"] as const;
+
+export function demoCitiesFor(domain: "book" | "place"): string[] {
+  return domain === "book" ? [...DEMO_BOOK_CITIES] : [...DEMO_PLACE_CITIES];
+}
+
 export const DEMO_PRESETS: Record<DemoPresetId, ConfigPatch & { id: DemoPresetId }> = {
   concierge: {
     id: "concierge",
@@ -17,7 +24,7 @@ export const DEMO_PRESETS: Record<DemoPresetId, ConfigPatch & { id: DemoPresetId
     },
     taskQuestion: "Recommend three places for my evening in this city, considering my interests, budget and practical needs.",
     recommendationCount: 3,
-    cities: ["Lisbon"],
+    cities: [...DEMO_PLACE_CITIES],
     profile: {
       label: "Guest",
       age: "34",
@@ -47,7 +54,7 @@ export const DEMO_PRESETS: Record<DemoPresetId, ConfigPatch & { id: DemoPresetId
     },
     taskQuestion: "Recommend three books for my interests, preferred language and budget.",
     recommendationCount: 3,
-    cities: ["Chicago"],
+    cities: [...DEMO_BOOK_CITIES],
     profile: {
       label: "Reader",
       age: "34",

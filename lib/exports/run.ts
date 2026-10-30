@@ -1,45 +1,49 @@
-import { formatAffinity } from "@/lib/audit/metrics";
+import { geographyApplied } from "@/lib/audit/geography";
+import { formatAffinity3 } from "@/lib/audit/metrics";
+import { describeDiff } from "@/lib/audit/select";
 import { toCsv } from "@/lib/exports/csv";
 import { SCHEMA_VERSION } from "@/lib/schemas/limits";
-import { createSession, withHash, type CaseRecord, type ScoreRow, type SessionState } from "@/lib/session/state";
+import { createSession, emptyCase, withHash, type CaseRecord, type ScoreRow, type SessionState } from "@/lib/session/state";
 
-function arms(item: CaseRecord): { arm: string; rank: number; entityId: string; name: string; match: string; affinity: number | null; explanation: string; verification: string }[] {
-  const rows: { arm: string; rank: number; entityId: string; name: string; match: string; affinity: number | null; explanation: string; verification: string }[] = [];
+function membership(item: CaseRecord, entityId: string, arm: "original" | "revised"): string {
+  const diff = item.diagnostic?.diff ?? describeDiff({
+    original: item.extracted.filter((pick) => pick.entityId).map((pick) => ({ entityId: pick.entityId as string, name: pick.name })),
+    selected: item.revisedSelections.map((selection) => ({ entityId: selection.id, name: selection.name })),
+    newCandidateCount: item.diagnostic?.newCandidateCount ?? item.discovered.length,
+    comparable: true,
+  });
+  const key = entityId.toLowerCase();
+  if (arm === "original") {
+    if (diff.removed.some((row) => row.entityId.toLowerCase() === key)) return "removed";
+    if (diff.reordered && diff.retained.some((row) => row.entityId.toLowerCase() === key && row.fromRank !== row.toRank)) return "reordered";
+    if (diff.retained.some((row) => row.entityId.toLowerCase() === key)) return "retained";
+    return "original";
+  }
+  if (diff.added.some((row) => row.entityId.toLowerCase() === key)) return "added";
+  if (diff.reordered && diff.retained.some((row) => row.entityId.toLowerCase() === key && row.fromRank !== row.toRank)) return "reordered";
+  if (diff.retained.some((row) => row.entityId.toLowerCase() === key)) return "retained";
+  return "selected";
+}
+
+function rankChanged(item: CaseRecord, entityId: string): boolean {
+  const row = item.diagnostic?.diff.retained.find((itemRow) => itemRow.entityId.toLowerCase() === entityId.toLowerCase());
+  return Boolean(row && row.fromRank !== row.toRank);
+}
+
+function arms(item: CaseRecord, domain: SessionState["domain"]): { arm: string; rank: number; entityId: string; name: string; affinity: number | null; identity: string; membership: string; rankChanged: boolean; explanation: string; verification: string }[] {
+  const rows: { arm: string; rank: number; entityId: string; name: string; affinity: number | null; identity: string; membership: string; rankChanged: boolean; explanation: string; verification: string }[] = [];
   item.extracted.forEach((pick, index) => {
     const score = item.scores.find((row) => row.entityId === pick.entityId);
+    const entityId = pick.entityId ?? "";
     rows.push({
-      arm: "Original",
+      arm: "Original Gemini",
       rank: index + 1,
-      entityId: pick.entityId ?? "",
+      entityId,
       name: pick.name,
-      match: pick.matchStatus,
       affinity: score?.affinity ?? null,
-      explanation: explain(score),
-      verification: verdict(item, pick.entityId),
-    });
-  });
-  item.rerankIds.forEach((id, index) => {
-    const score = item.scores.find((row) => row.entityId === id);
-    rows.push({
-      arm: "Qloo rerank",
-      rank: index + 1,
-      entityId: id,
-      name: score?.name ?? id,
-      match: "scored",
-      affinity: score?.affinity ?? null,
-      explanation: explain(score),
-      verification: verdict(item, id),
-    });
-  });
-  item.refinedExtracted.forEach((pick, index) => {
-    const score = item.scores.find((row) => row.entityId === pick.entityId);
-    rows.push({
-      arm: "Self-refinement",
-      rank: index + 1,
-      entityId: pick.entityId ?? "",
-      name: pick.name,
-      match: pick.matchStatus,
-      affinity: score?.affinity ?? null,
+      identity: pick.matchStatus,
+      membership: entityId ? membership(item, entityId, "original") : "unresolved",
+      rankChanged: entityId ? rankChanged(item, entityId) : false,
       explanation: explain(score),
       verification: verdict(item, pick.entityId),
     });
@@ -47,16 +51,19 @@ function arms(item: CaseRecord): { arm: string; rank: number; entityId: string; 
   item.revisedSelections.forEach((selection, index) => {
     const score = item.scores.find((row) => row.entityId === selection.id);
     rows.push({
-      arm: "Qloo revision",
+      arm: "Qloo-assisted Gemini",
       rank: index + 1,
       entityId: selection.id,
       name: selection.name,
-      match: "allowlist",
       affinity: score?.affinity ?? null,
+      identity: "selected",
+      membership: membership(item, selection.id, "revised"),
+      rankChanged: rankChanged(item, selection.id),
       explanation: selection.reason,
       verification: verdict(item, selection.id),
     });
   });
+  void domain;
   return rows;
 }
 
@@ -75,47 +82,40 @@ function verdict(item: CaseRecord, id: string | null): string {
 
 export function recommendationsCsv(state: SessionState): string {
   const headers = [
-    "Company",
-    "City",
-    "Profile",
-    "Question",
-    "Arm",
-    "Recommendation rank",
-    "Entity id",
-    "Entity name",
-    "Match status",
-    "Affinity",
-    "Verification",
-    "Explanation",
-    "Model",
-    "Timestamp",
-    "Evidence origin",
-    "Original answer",
-    "Revised answer",
+    "run_id",
+    "city",
+    "scenario",
+    "arm",
+    "rank",
+    "entity_id",
+    "name",
+    "affinity",
+    "identity_status",
+    "membership_status",
+    "rank_changed",
+    "explanation",
+    "geography_applied",
+    "practical_verification_status",
   ];
   const rows: unknown[][] = [];
   for (const item of Object.values(state.cases)) {
-    const model = item.observedModel ?? item.originalProvenance?.model ?? (state.assistantMode === "paste" ? "Unknown pasted model" : "");
-    const timestamp = item.originalProvenance?.retrievedAt ?? item.revisedProvenance?.retrievedAt ?? "";
-    for (const row of arms(item)) {
+    const geography = geographyApplied(state.domain, Boolean(item.signals?.geographicSignalApplied));
+    for (const row of arms(item, state.domain)) {
       rows.push([
-        state.company.name,
+        state.runId,
         item.city,
-        state.profile.label,
-        state.taskQuestion,
+        state.domain,
         row.arm,
         row.rank,
         row.entityId,
         row.name,
-        row.match,
-        row.affinity === null ? "" : formatAffinity(row.affinity),
-        row.verification,
+        row.affinity === null ? "" : formatAffinity3(row.affinity),
+        row.identity,
+        row.membership,
+        row.rankChanged ? "true" : "false",
         row.explanation,
-        model,
-        timestamp,
-        state.source === "imported" ? "imported" : "session",
-        item.originalAnswer ?? "",
-        item.revisedAnswer ?? "",
+        geography ? "true" : "false",
+        row.verification || "unverified",
       ]);
     }
   }
@@ -168,12 +168,18 @@ export function importDocument(raw: unknown): { ok: true; state: SessionState } 
   for (const [city, item] of Object.entries(session.cases)) {
     if (!item || typeof item !== "object") continue;
     cases[city] = {
+      ...emptyCase(city),
       ...item,
+      phase: item.phase ?? (item.stages?.summarize?.status === "complete" ? "complete" : "queued"),
+      diagnostic: item.diagnostic ?? null,
+      originalPrompt: item.originalPrompt ?? null,
+      revisedPrompt: item.revisedPrompt ?? null,
       scores: Array.isArray(item.scores)
         ? item.scores.map((row) => ({
             ...stripImported(row),
             tags: Array.isArray(row.tags) ? row.tags : [],
             language: row.language ?? null,
+            imageUrl: row.imageUrl ?? null,
           }))
         : [],
     };

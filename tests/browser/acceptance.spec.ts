@@ -80,12 +80,16 @@ test.describe("acceptance", () => {
     await page.getByTestId("demo-continue").click();
     await page.getByTestId("favorite-name-0").fill("Spirited Away");
     await page.getByTestId("run-audit").click();
+    await expect(page.getByRole("heading", { name: "One customer brief. Four city comparisons." })).toBeVisible();
+    for (const city of ["Lisbon", "New York", "Kuala Lumpur", "Osaka"]) {
+      await expect(page.getByRole("tab", { name: city })).toBeVisible();
+    }
     await expect(page.getByTestId("stage-evidence-check")).toHaveText("failed");
     await page.getByTestId("retry-stage").click();
-    await expect(page.getByTestId("revised-answer")).toContainText("Revised answer");
+    await expect(page.getByTestId("revised-answer").first()).toContainText("Revised answer");
     await page.getByTestId("compare-all").click();
     await expect(page.getByText("A quieter revision")).toBeVisible();
-    await expect(page.getByText("0.4200").first()).toBeVisible();
+    await expect(page.getByText("0.420").first()).toBeVisible();
 
     await page.getByTestId("nav-methodology").click();
     await expect(page.getByRole("heading", { name: "Methodology" })).toBeVisible();

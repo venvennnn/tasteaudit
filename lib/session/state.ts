@@ -1,3 +1,4 @@
+import type { SelectionDiff } from "@/lib/audit/select";
 import { configurationHash } from "@/lib/audit/hash";
 import type { CaseMetrics } from "@/lib/audit/metrics";
 import type { ConstraintCheck } from "@/lib/audit/constraints";
@@ -57,6 +58,7 @@ export type ScoreRow = {
   envelope: string | null;
   tags: string[];
   language: string | null;
+  imageUrl: string | null;
 };
 
 export type NamedPick = {
@@ -72,6 +74,24 @@ export type RevisedSelection = {
   id: string;
   name: string;
   reason: string;
+  policyReason?: string;
+};
+
+export type CityPhase = "queued" | "generating" | "discovering" | "evaluating" | "complete" | "failed";
+
+export type SelectionDiagnostic = {
+  originalIds: string[];
+  discoveredIds: string[];
+  eligibleIds: string[];
+  selectedIds: string[];
+  newCandidateCount: number;
+  retainedCount: number;
+  replacementCount: number;
+  scoringSignals: { name: string; value: string }[];
+  exclusions: { entityId: string; name: string; reason: string }[];
+  geographyNote: string;
+  summary: string;
+  diff: SelectionDiff;
 };
 
 export type SignalSnapshot = {
@@ -81,6 +101,8 @@ export type SignalSnapshot = {
   geographicSignalApplied: boolean;
   localityName: string | null;
   coordinatesReturned: boolean;
+  localityLatitude?: number | null;
+  localityLongitude?: number | null;
 };
 
 export type RecordedMark = {
@@ -93,6 +115,7 @@ export type RecordedMark = {
 
 export type CaseRecord = {
   city: string;
+  phase: CityPhase;
   stages: Record<StageName, StageState>;
   originalAnswer: string | null;
   refinedAnswer: string | null;
@@ -108,6 +131,9 @@ export type CaseRecord = {
   rerankIds: string[];
   rerankNote: string | null;
   revisedSelections: RevisedSelection[];
+  diagnostic: SelectionDiagnostic | null;
+  originalPrompt: string | null;
+  revisedPrompt: string | null;
   metrics: CaseMetrics | null;
   warnings: string[];
   signals: SignalSnapshot | null;
@@ -192,6 +218,7 @@ export function stageMap(): Record<StageName, StageState> {
 export function emptyCase(city: string): CaseRecord {
   return {
     city,
+    phase: "queued",
     stages: stageMap(),
     originalAnswer: null,
     refinedAnswer: null,
@@ -207,6 +234,9 @@ export function emptyCase(city: string): CaseRecord {
     rerankIds: [],
     rerankNote: null,
     revisedSelections: [],
+    diagnostic: null,
+    originalPrompt: null,
+    revisedPrompt: null,
     metrics: null,
     warnings: [],
     signals: null,
@@ -319,7 +349,8 @@ export type Action =
   | { type: "patch-case"; city: string; patch: CasePatch }
   | { type: "compare" }
   | { type: "vote"; city: string; vote: VoteState }
-  | { type: "record"; city: string; mark: RecordedMark };
+  | { type: "record"; city: string; mark: RecordedMark }
+  | { type: "begin-run"; runId: string; cities: string[] };
 
 export function reducer(state: SessionState, action: Action): SessionState {
   switch (action.type) {
@@ -354,6 +385,7 @@ export function reducer(state: SessionState, action: Action): SessionState {
       for (const [city, item] of Object.entries(state.cases)) {
         cases[city] = {
           ...item,
+          phase: "evaluating",
           refinedAnswer: null,
           refinedProvenance: null,
           refinedExtracted: [],
@@ -386,6 +418,15 @@ export function reducer(state: SessionState, action: Action): SessionState {
         ...state,
         cases: { ...state.cases, [action.city]: { ...item, recorded: action.mark } },
       };
+    }
+    case "begin-run": {
+      const cases: Record<string, CaseRecord> = {};
+      for (const city of action.cities) {
+        const name = city.trim();
+        if (!name) continue;
+        cases[name] = { ...emptyCase(name), phase: "queued" };
+      }
+      return { ...state, runId: action.runId, running: true, cities: action.cities, cases, resultsHash: state.configHash };
     }
     default:
       return state;

@@ -165,13 +165,14 @@ export function repairPrompt(task: TaskSpec, lines: GroundingLine[]): string {
     })
     .join("\n");
   return [
-    "Choose recommendation ids only from the allowlist below.",
-    "Qloo supplied the evidence. Do not invent contribution weights, customer behavior, opening hours, stock, prices, or accessibility.",
-    "A high affinity does not override a failed hard constraint.",
+    "These recommendations were already selected. Write the revised answer for this list only.",
+    "Return every supplied id, in the same order. Do not add, drop, or reorder ids.",
+    "For each id, write one or two sentences. Use only the supplied affinity and explainability.",
+    "Do not invent contribution weights, customer behavior, opening hours, stock, prices, or accessibility.",
+    "If a practical fact was not supplied, say it is unverified.",
     "If explainability says Unavailable, do not create weights.",
-    `Select at most ${task.count} ids. Do not repeat an id.`,
     customerBlock(task),
-    "Allowlist:",
+    "Selected recommendations:",
     evidence,
   ].join("\n\n");
 }

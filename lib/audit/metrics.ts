@@ -91,3 +91,15 @@ export function formatSigned(value: number | null): string {
   const text = Math.abs(value).toFixed(4);
   return value > 0 ? `+${text}` : `-${text}`;
 }
+
+export function formatAffinity3(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  return value.toFixed(3);
+}
+
+export function formatSigned3(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "—";
+  if (Math.abs(value) < 0.0005) return "0.000";
+  const text = Math.abs(value).toFixed(3);
+  return value > 0 ? `+${text}` : `-${text}`;
+}
