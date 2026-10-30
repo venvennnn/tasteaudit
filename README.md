@@ -28,7 +28,7 @@ Fill the server variables in `.env.local`. None of them use a `NEXT_PUBLIC_` pre
 | `GEMINI_API_KEY` | Google Gemini API key. This is separate from the Qloo hackathon email. |
 | `GEMINI_MODEL` | Optional. Unset uses `gemini-3.8-flash`. The server uses one model for every arm. Gemini 3.8 does not accept temperature or top-p, so those parameters are not sent. |
 | `EVIDENCE_SIGNING_SECRET` | Optional. At least 16 characters. Scoring then returns a short-lived HMAC envelope, and the revision includes numeric affinity only when that envelope verifies. |
-| `TASTEAUDIT_MAX_CITIES` | Optional cap, at most 3 |
+| `TASTEAUDIT_MAX_CITIES` | Optional cap, at most 4 |
 | `TASTEAUDIT_INSTANCE_RPM` | Optional per-isolate request cap. This resets with the process and is not a durable global rate limit. |
 | `QLOO_TIMEOUT_MS` | Upstream Qloo budget, default 12000, kept below the route limit |
 | `GEMINI_TIMEOUT_MS` | Upstream Gemini budget, default 25000 |
@@ -37,7 +37,7 @@ Fill the server variables in `.env.local`. None of them use a `NEXT_PUBLIC_` pre
 npm run dev
 ```
 
-Open `http://localhost:3000`. Run one city before adding another. The demo presets are inputs, not completed audits. “Simulated concierge” and “Simulated bookseller” are unaffiliated with Marriott and Barnes & Noble.
+Open `http://localhost:3000`. The demo runs four configured cities from one action. The same customer brief is used in every city. The demo presets are inputs, not completed audits. “Simulated concierge” and “Simulated bookseller” are unaffiliated with Marriott and Barnes & Noble.
 
 ```bash
 npm run smoke

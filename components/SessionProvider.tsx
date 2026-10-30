@@ -10,7 +10,7 @@ type SessionApi = {
   state: SessionState;
   update: (patch: ConfigPatch) => void;
   reset: () => void;
-  run: (cities?: string[]) => Promise<void>;
+  run: (cities?: string[], fresh?: boolean) => Promise<void>;
   compare: () => Promise<void>;
   correctSeed: (query: string, entityId: string) => void;
   vote: (city: string, vote: VoteState) => void;
@@ -37,35 +37,55 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
   stateRef.current = state;
   const abortRef = useRef<AbortController | null>(null);
   const generation = useRef(0);
-  const token = useRef(0);
+  const epochRef = useRef(0);
+  const cityEpoch = useRef(new Map<string, number>());
+  const controllers = useRef(new Map<string, AbortController>());
+  const inflight = useRef(0);
 
   const api = useMemo<SessionApi>(() => {
-    const runWith = async (snapshot: SessionState, cities?: string[]) => {
-      const gen = generation.current;
-      const mine = ++token.current;
+    const abortAll = () => {
       abortRef.current?.abort();
-      const controller = new AbortController();
-      abortRef.current = controller;
+      for (const controller of controllers.current.values()) controller.abort();
+      controllers.current.clear();
+    };
+    const runWith = async (snapshot: SessionState, cities: string[]) => {
+      const epoch = epochRef.current;
+      const gen = generation.current;
+      inflight.current += 1;
+      const seedController = new AbortController();
+      abortRef.current = seedController;
+      const expected = new Map<string, number>();
+      for (const city of cities) {
+        controllers.current.get(city)?.abort();
+        const controller = new AbortController();
+        controllers.current.set(city, controller);
+        const nextEpoch = (cityEpoch.current.get(city) ?? 0) + 1;
+        cityEpoch.current.set(city, nextEpoch);
+        expected.set(city, nextEpoch);
+      }
       dispatch({ type: "running", running: true });
       try {
         await executeRun({
           state: snapshot,
-          cities: cities && cities.length > 0 ? cities : activeCities(snapshot).slice(0, 1),
-          signal: controller.signal,
+          cities,
+          signal: seedController.signal,
+          signalFor: (city) => controllers.current.get(city)?.signal ?? seedController.signal,
+          isCurrent: (city) => epochRef.current === epoch && generation.current === gen && cityEpoch.current.get(city) === expected.get(city),
           post: postJson,
           onSeeds: (seeds, stage) => {
-            if (generation.current !== gen) return;
+            if (generation.current !== gen || epochRef.current !== epoch) return;
             dispatch({ type: "seeds", seeds, stage });
           },
           onCase: (city, patch) => {
-            if (generation.current !== gen) return;
+            if (generation.current !== gen || epochRef.current !== epoch || cityEpoch.current.get(city) !== expected.get(city)) return;
             dispatch({ type: "patch-case", city, patch });
           },
         });
       } catch {
         // Seed failures are stored on the seed stage. Later stage failures stay on the case.
       } finally {
-        if (token.current === mine && generation.current === gen) dispatch({ type: "running", running: false });
+        inflight.current -= 1;
+        if (inflight.current === 0 && epochRef.current === epoch && generation.current === gen) dispatch({ type: "running", running: false });
       }
     };
 
@@ -74,18 +94,32 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
       update: (patch) => {
         const next = reducer(stateRef.current, { type: "update", patch });
         if (next.configHash !== stateRef.current.configHash) {
-          abortRef.current?.abort();
+          abortAll();
+          epochRef.current += 1;
           generation.current += 1;
         }
         stateRef.current = next;
         dispatch({ type: "update", patch });
       },
       reset: () => {
-        abortRef.current?.abort();
+        abortAll();
+        epochRef.current += 1;
         generation.current += 1;
         dispatch({ type: "reset" });
       },
-      run: (cities) => runWith(stateRef.current, cities),
+      run: (cities, fresh = false) => {
+        let snapshot = stateRef.current;
+        const list = cities && cities.length > 0 ? cities : activeCities(snapshot).slice(0, 1);
+        if (fresh) {
+          abortAll();
+          epochRef.current += 1;
+          const runId = crypto.randomUUID();
+          snapshot = reducer(snapshot, { type: "begin-run", runId, cities: list });
+          stateRef.current = snapshot;
+          dispatch({ type: "begin-run", runId, cities: list });
+        }
+        return runWith(snapshot, list);
+      },
       compare: async () => {
         const next = reducer(stateRef.current, { type: "compare" });
         dispatch({ type: "replace", state: next });
@@ -96,7 +130,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         const current = stateRef.current;
         const next = reducer(current, { type: "update", patch: { seedOverrides: { ...current.seedOverrides, [query]: entityId } } });
         if (next.configHash !== current.configHash) {
-          abortRef.current?.abort();
+          abortAll();
+          epochRef.current += 1;
           generation.current += 1;
         }
         stateRef.current = next;
@@ -123,7 +158,8 @@ export function SessionProvider({ children }: { children: React.ReactNode }) {
         try {
           const parsed = importDocument(JSON.parse(text) as unknown);
           if (!parsed.ok) return parsed.message;
-          abortRef.current?.abort();
+          abortAll();
+          epochRef.current += 1;
           generation.current += 1;
           dispatch({ type: "replace", state: parsed.state });
           return null;

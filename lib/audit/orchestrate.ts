@@ -1,10 +1,13 @@
 import { ageBandLabel, ageToSupportedBand } from "@/lib/audit/age";
 import { verifyConstraints } from "@/lib/audit/constraints";
+import { geographyNote } from "@/lib/audit/geography";
 import { configurationHash } from "@/lib/audit/hash";
-import { buildCaseMetrics } from "@/lib/audit/metrics";
+import { buildCaseMetrics, meanObserved } from "@/lib/audit/metrics";
 import { dedupeCandidates } from "@/lib/audit/pool";
 import { rerankOriginal } from "@/lib/audit/rerank";
-import { LIMITS, searchTypesForDomain, searchTypesForKind, type Domain } from "@/lib/schemas/limits";
+import { selectRevised } from "@/lib/audit/select";
+import { originalPrompt, repairPrompt, type GroundingLine } from "@/lib/providers/gemini";
+import { LIMITS, searchTypesForDomain, searchTypesForKind, ENTITY_ID_PATTERN, type Domain } from "@/lib/schemas/limits";
 import type { TaskSpec } from "@/lib/schemas/api";
 import type { GeminiProvenance } from "@/lib/providers/gemini";
 import type { Explainability } from "@/lib/providers/qloo";
@@ -180,6 +183,8 @@ function signalSnapshot(input: {
     geographicSignalApplied: input.geographic,
     localityName: input.locality?.name ?? null,
     coordinatesReturned,
+    localityLatitude: input.locality?.latitude ?? null,
+    localityLongitude: input.locality?.longitude ?? null,
   };
 }
 
@@ -204,6 +209,8 @@ export async function executeRun(options: {
   signal: AbortSignal;
   onSeeds: (seeds: ResolvedSeed[], stage: CaseRecord["stages"]["original"]) => void;
   onCase: (city: string, patch: CasePatch) => void;
+  signalFor?: (city: string) => AbortSignal;
+  isCurrent?: (city: string) => boolean;
 }): Promise<void> {
   const { state, post, signal } = options;
   const cities = options.cities.map((city) => city.trim()).filter(Boolean).slice(0, LIMITS.cities);
@@ -253,6 +260,14 @@ export async function executeRun(options: {
       const failure = failureOf(error);
       if (failure.code === "aborted") return;
       options.onSeeds([], { status: "failed", error: failure });
+      for (const city of cities) {
+        if (options.isCurrent && !options.isCurrent(city)) continue;
+        options.onCase(city, {
+          phase: "failed",
+          warnings: [failure.message],
+          stages: { original: { status: "failed", error: failure } },
+        });
+      }
       throw failure;
     }
   }
@@ -260,20 +275,26 @@ export async function executeRun(options: {
   const seedIds = seeds.map((seed) => seed.entityId).filter((id): id is string => Boolean(id));
   const age = parseAge(state.profile.age);
   const ageBand = ageToSupportedBand(age);
-  let sharedDiscovery: DiscoverData | null = null;
+  let bookDiscovery: Promise<ApiOk<DiscoverData>> | null = null;
 
-  for (const city of cities) {
-    if (signal.aborted) return;
+  await pooled(cities, 2, async (city) => {
+    const signal = options.signalFor?.(city) ?? options.signal;
+    if (signal.aborted || (options.isCurrent && !options.isCurrent(city))) return;
     const task = buildTask({ ...state, seeds }, city, seeds);
     if ("error" in task) {
       options.onCase(city, {
+        phase: "failed",
         stages: { ...emptyCase(city).stages, original: { status: "failed", error: { code: "invalid_request", message: task.error, retryable: false, requestId: "" } } },
         warnings: [task.error],
       });
-      continue;
+      return;
     }
     const existing = state.cases[city] ?? emptyCase(city);
-    const patch = (partial: CasePatch) => options.onCase(city, partial);
+    const patch = (partial: CasePatch) => {
+      if (options.isCurrent && !options.isCurrent(city)) return;
+      options.onCase(city, partial);
+    };
+    patch({ phase: "generating" });
     let current: StageName = "original";
     const warnings = [...existing.warnings];
     let observedModel = existing.observedModel;
@@ -310,7 +331,7 @@ export async function executeRun(options: {
         originalAnswer = response.data.answer;
         originalProvenance = response.provenance as unknown as GeminiProvenance;
         noteModel(originalProvenance);
-        patch({ originalAnswer, originalProvenance, observedModel, stages: { original: { status: "complete", error: null } } });
+        patch({ originalAnswer, originalProvenance, originalPrompt: originalPrompt(task), observedModel, stages: { original: { status: "complete", error: null } } });
       }
 
       let refinedAnswer = existing.refinedAnswer;
@@ -351,6 +372,7 @@ export async function executeRun(options: {
       if (seedIds.length === 0) {
         warnings.push("No favorite resolved to a Qloo id, so discovery and scoring were not run.");
         patch({
+          phase: "failed",
           warnings: [...warnings],
           stages: {
             discover: { status: "failed", error: { code: "empty_response", message: "No resolved interests to send.", retryable: false, requestId: "" } },
@@ -358,26 +380,32 @@ export async function executeRun(options: {
             revise: { status: "skipped", error: null },
           },
         });
-        continue;
+        return;
       }
 
       if (discovered.length === 0) {
         current = "discover";
-        patch({ stages: { discover: { status: "running", error: null } } });
+        patch({ phase: "discovering", stages: { discover: { status: "running", error: null } } });
         let data: DiscoverData;
-        if (state.domain === "book" && sharedDiscovery) {
-          data = sharedDiscovery;
-          warnings.push("Book discovery was reused. A city filter was not sent to Qloo.");
+        if (state.domain === "book") {
+          bookDiscovery ??= post<DiscoverData>("/api/qloo/discover", {
+            domain: state.domain,
+            seedIds,
+            ageBand: ageBand ?? undefined,
+          }, options.signal);
+          const response = await bookDiscovery;
+          data = response.data;
+          warnings.push(...response.warnings);
+          warnings.push("Book discovery is interest-based. A city filter was not sent to Qloo.");
         } else {
           const response = await post<DiscoverData>("/api/qloo/discover", {
             domain: state.domain,
             seedIds,
-            locationQuery: state.domain === "place" ? city : undefined,
+            locationQuery: city,
             ageBand: ageBand ?? undefined,
           }, signal);
           data = response.data;
           warnings.push(...response.warnings);
-          if (state.domain === "book") sharedDiscovery = data;
         }
         discovered = data.entities;
         signals = signalSnapshot({
@@ -426,12 +454,12 @@ export async function executeRun(options: {
       let scores = existing.scores;
       if (ids.length === 0) {
         warnings.push("There were no resolved entities to score.");
-        patch({ warnings: [...warnings], stages: { score: { status: "failed", error: { code: "empty_response", message: "Nothing to score.", retryable: false, requestId: "" } } } });
-        continue;
+        patch({ phase: "failed", warnings: [...warnings], stages: { score: { status: "failed", error: { code: "empty_response", message: "Nothing to score.", retryable: false, requestId: "" } } } });
+        return;
       }
       if (existing.scoreFingerprint !== nextFingerprint || scores.length === 0) {
         current = "score";
-        patch({ stages: { score: { status: "running", error: null } } });
+        patch({ phase: "evaluating", stages: { score: { status: "running", error: null } } });
         const response = await post<ScoreData>("/api/qloo/score", {
           domain: state.domain,
           seedIds,
@@ -455,6 +483,7 @@ export async function executeRun(options: {
             envelope: found?.envelope ?? null,
             tags: found?.tags?.map((tag) => tag.name).filter(Boolean) ?? [],
             language: found?.language ?? null,
+            imageUrl: null,
           } satisfies ScoreRow;
         });
         if (!signals) {
@@ -484,59 +513,123 @@ export async function executeRun(options: {
         stages: { rerank: { status: "complete", error: null } },
       });
 
-      let revisedSelections = existing.revisedSelections;
-      let revisedAnswer = existing.revisedAnswer;
-      let revisedProvenance = existing.revisedProvenance;
-      if (!revisedAnswer || existing.scoreFingerprint !== nextFingerprint) {
-        current = "revise";
-        patch({ stages: { revise: { status: "running", error: null } } });
-        const response = await post<RepairData>("/api/gemini/repair", {
-          task,
-          seedIds,
-          candidates: scores.map((row) => ({
+      const checksById: CaseRecord["checksById"] = {};
+      for (const row of scores) {
+        const verified = verifyConstraints({
+          language: state.profile.language,
+          requirements: state.profile.requirements,
+          facts: { language: row.language, tags: row.tags },
+        });
+        checksById[row.entityId] = verified.checks;
+      }
+      const originalIds = extracted
+        .map((pick) => pick.entityId)
+        .filter((id): id is string => typeof id === "string" && ENTITY_ID_PATTERN.test(id));
+      const selection = selectRevised({
+        count: state.recommendationCount,
+        originalIds,
+        comparable: scores.some((row) => row.affinity !== null),
+        candidates: scores.map((row) => {
+          const failed = (checksById[row.entityId] ?? []).filter((check) => check.verdict === "fail");
+          return {
             entityId: row.entityId,
             name: row.name,
             affinity: row.affinity,
-            explainability: row.explainability,
-            envelope: row.envelope ?? undefined,
-            evidenceOrigin: row.evidenceOrigin === "imported" ? "imported" : row.envelope ? "provider" : "unsigned",
-          })),
+            sources: row.sources,
+            group: row.tags[0] ?? row.types[0] ?? null,
+            hardExcluded: failed.length > 0,
+            exclusionReason: failed.map((check) => check.reason).join(" ") || null,
+          };
+        }),
+      });
+      const discoveredIds = discovered.map((item) => item.entityId);
+      const diagnostic = {
+        originalIds,
+        discoveredIds,
+        eligibleIds: selection.eligibleIds,
+        selectedIds: selection.selected.map((item) => item.entityId),
+        newCandidateCount: discoveredIds.filter((id) => !originalIds.some((original) => original.toLowerCase() === id.toLowerCase())).length,
+        retainedCount: selection.diff.retainedCount,
+        replacementCount: selection.diff.replacementCount,
+        scoringSignals: (signals?.qloo ?? []).map((item) => ({ ...item })),
+        exclusions: selection.exclusions,
+        geographyNote: geographyNote(state.domain, Boolean(signals?.geographicSignalApplied)),
+        summary: selection.diff.summary,
+        diff: selection.diff,
+      };
+      let revisedSelections = selection.selected.map((item) => ({
+        id: item.entityId,
+        name: item.name,
+        reason: item.policyReason,
+        policyReason: item.policyReason,
+      }));
+      let revisedAnswer = existing.revisedAnswer;
+      let revisedProvenance = existing.revisedProvenance;
+      const selectionChanged = existing.scoreFingerprint !== nextFingerprint
+        || existing.revisedSelections.map((item) => item.id).join("|") !== revisedSelections.map((item) => item.id).join("|");
+      if (revisedSelections.length === 0) {
+        revisedAnswer = selection.diff.summary;
+        warnings.push(selection.diff.summary);
+        patch({ revisedAnswer, revisedSelections, revisedProvenance: null, diagnostic, stages: { revise: { status: "complete", error: null } } });
+      } else if (!revisedAnswer || selectionChanged) {
+        current = "revise";
+        patch({ phase: "evaluating", diagnostic, stages: { revise: { status: "running", error: null } } });
+        const chosen = new Map(selection.selected.map((item) => [item.entityId.toLowerCase(), item]));
+        const lines: GroundingLine[] = revisedSelections.map((item) => {
+          const row = scoreById.get(item.id.toLowerCase());
+          return {
+            id: item.id,
+            name: item.name,
+            affinity: row?.affinity ?? null,
+            authenticated: false,
+            explainability: row?.explainability.status === "available"
+              ? row.explainability.contributions.map((part) => `${part.name ?? part.entityId ?? "signal"} ${part.value}`).join("; ")
+              : "Unavailable",
+          };
+        });
+        const response = await post<RepairData>("/api/gemini/repair", {
+          task,
+          seedIds,
+          candidates: revisedSelections.map((item) => {
+            const row = scoreById.get(item.id.toLowerCase());
+            return {
+              entityId: item.id,
+              name: item.name,
+              affinity: row?.affinity ?? null,
+              explainability: row?.explainability,
+              envelope: row?.envelope ?? undefined,
+              evidenceOrigin: row?.evidenceOrigin === "imported" ? "imported" : row?.envelope ? "provider" : "unsigned",
+            };
+          }),
         }, signal);
         warnings.push(...response.warnings);
         revisedProvenance = response.provenance as unknown as GeminiProvenance;
         noteModel(revisedProvenance);
         revisedAnswer = response.data.answer;
-        revisedSelections = response.data.selections.map((selection) => ({
-          id: selection.id,
-          name: scoreById.get(selection.id.toLowerCase())?.name ?? selection.id,
-          reason: selection.reason,
+        const reasons = new Map(response.data.selections.map((item) => [item.id.toLowerCase(), item.reason]));
+        revisedSelections = selection.selected.map((item) => ({
+          id: item.entityId,
+          name: item.name,
+          reason: reasons.get(item.entityId.toLowerCase()) || item.policyReason,
+          policyReason: item.policyReason,
         }));
+        if (response.data.selections.some((item) => !chosen.has(item.id.toLowerCase()))) {
+          warnings.push("The writer returned a different set. The displayed recommendations follow the selection policy.");
+        }
         patch({
           revisedAnswer,
           revisedSelections,
           revisedProvenance,
+          revisedPrompt: repairPrompt(task, lines),
+          diagnostic,
           observedModel,
           warnings: [...warnings],
           stages: { revise: { status: "complete", error: null } },
         });
       }
-
-      const checksById: CaseRecord["checksById"] = {};
-      for (const row of scores) {
-        const facts = {
-          language: row.language,
-          tags: row.tags,
-        };
-        const verified = verifyConstraints({
-          language: state.profile.language,
-          requirements: state.profile.requirements,
-          facts,
-        });
-        checksById[row.entityId] = verified.checks;
-      }
       const revisedIds = revisedSelections.map((selection) => selection.id);
-      const originalIds = extracted.map((pick) => pick.entityId ?? `unresolved:${pick.name.toLowerCase()}`);
-      const armIds = revisedIds.length > 0 ? revisedIds : originalIds;
+      const originalMetricIds = extracted.map((pick) => pick.entityId ?? `unresolved:${pick.name.toLowerCase()}`);
+      const armIds = revisedIds;
       const constraintTotals = Object.values(checksById);
       const known = constraintTotals.reduce((sum, checks) => sum + checks.filter((check) => check.verdict !== "unknown").length, 0);
       const totalChecks = constraintTotals.reduce((sum, checks) => sum + checks.length, 0);
@@ -547,25 +640,33 @@ export async function executeRun(options: {
         resolvedPicks: originalIds.length,
         poolAffinities: scores.map((row) => row.affinity),
         armAffinities: armIds.map((id) => scoreById.get(id.toLowerCase())?.affinity ?? null),
-        originalIds,
+        originalIds: originalMetricIds,
         revisedIds,
         constraintsKnown: known,
         constraintsTotal: totalChecks,
         comparabilityLimited: false,
       });
+      const originalMean = meanObserved(originalIds.map((id) => scoreById.get(id.toLowerCase())?.affinity ?? null));
+      const revisedMean = meanObserved(revisedIds.map((id) => scoreById.get(id.toLowerCase())?.affinity ?? null));
       patch({
+        phase: "complete",
         checksById,
-        metrics,
-        warnings: [...warnings],
+        diagnostic,
+        metrics: {
+          ...metrics,
+          meanObservedAffinity: revisedMean,
+        },
+        warnings: [...warnings, originalMean.value === null && revisedMean.value === null ? "Insufficient evidence to compare." : ""].filter(Boolean),
         observedModel,
         stages: { summarize: { status: "complete", error: null } },
       });
     } catch (error) {
       const failure = failureOf(error);
+      if (options.isCurrent && !options.isCurrent(city)) return;
       if (failure.code === "aborted") return;
-      patch({ stages: { [current]: { status: "failed", error: failure } }, warnings: [...warnings, failure.message] });
+      patch({ phase: "failed", stages: { [current]: { status: "failed", error: failure } }, warnings: [...warnings, failure.message] });
     }
-  }
+  });
 }
 
 async function resolvePicks(post: Poster, signal: AbortSignal, domain: Domain, picks: { name: string; quote: string }[]): Promise<NamedPick[]> {

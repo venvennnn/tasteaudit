@@ -1,19 +1,18 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useSession } from "@/components/SessionProvider";
 import { Frame } from "@/components/Frame";
 import { Journey } from "@/components/Journey";
 import { ModeSwitch } from "@/components/ModeSwitch";
 import { StartRail, WhoRail } from "@/components/Rails";
-import { hasRunActivity, RunProgress } from "@/components/RunProgress";
 import { ArtworkSearch, Cover } from "@/components/Cover";
 import { BellIcon, BookIcon } from "@/components/icons";
-import { ResultsBody } from "@/components/ResultsStudio";
 import { estimateProviderCalls } from "@/lib/audit/estimate";
 import { buildTask } from "@/lib/audit/orchestrate";
-import { DEMO_PRESETS, type DemoPresetId } from "@/lib/session/presets";
-import { activeCities, resultsReady, type Favorite } from "@/lib/session/state";
+import { DEMO_PRESETS, demoCitiesFor, type DemoPresetId } from "@/lib/session/presets";
+import { type Favorite } from "@/lib/session/state";
 
 const KIND_TABS: Array<{ id: Favorite["kind"]; label: string }> = [
   { id: "movie", label: "Movies & TV" },
@@ -23,25 +22,24 @@ const KIND_TABS: Array<{ id: Favorite["kind"]; label: string }> = [
 ];
 
 export function DemoStudio() {
+  const router = useRouter();
   const { state, update, run } = useSession();
   const filled = state.scenario === "demo" && state.profile.favorites.some((favorite) => favorite.name.trim());
   const [preset, setPreset] = useState<DemoPresetId | null>(state.scenario === "demo" ? (state.domain === "book" ? "bookseller" : "concierge") : null);
   const [view, setView] = useState<"pick" | "customer">(filled ? "customer" : "pick");
-  const [extraCity, setExtraCity] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [kindTab, setKindTab] = useState<Favorite["kind"]>("movie");
-  const cities = activeCities(state);
-  const taskPreview = useMemo(() => buildTask(state, cities[0] ?? "", state.seeds), [state, cities]);
+  const demoCities = demoCitiesFor(state.domain);
+  const taskPreview = useMemo(() => buildTask(state, demoCities[0] ?? "", state.seeds), [state, demoCities]);
   const estimate = estimateProviderCalls({
     favoriteCount: state.profile.favorites.filter((favorite) => favorite.name.trim()).length,
-    cityCount: Math.max(1, cities.length),
+    cityCount: demoCities.length,
     recommendationCount: state.recommendationCount,
     domain: state.domain,
     mode: "simulate",
     compare: state.compareAll,
   });
-  const ready = resultsReady(state);
-  const active = ready ? 4 : state.running ? 3 : view === "customer" ? 2 : 1;
+  const active = state.running ? 3 : view === "customer" ? 2 : 1;
 
   function applyPreset(id: DemoPresetId) {
     setPreset(id);
@@ -65,39 +63,39 @@ export function DemoStudio() {
   }
 
   async function start() {
-    const city = cities[0];
-    const task = buildTask(state, city ?? "", []);
+    const cities = demoCitiesFor(state.domain);
+    const task = buildTask(state, cities[0] ?? "", []);
     if ("error" in task) {
       setFormError(task.error);
       return;
     }
     setFormError(null);
-    await run([city]);
+    update({ cities });
+    const pending = run(cities, true);
+    router.push("/results");
+    await pending;
   }
 
   return (
     <Frame
-      word={view === "customer" || ready ? "WHO?" : "START\nHERE."}
-      rail={view === "customer" || ready ? <WhoRail /> : <StartRail />}
+      word={view === "customer" ? "WHO?" : "START\nHERE."}
+      rail={view === "customer" ? <WhoRail /> : <StartRail />}
       dock={(
-        <>
-          {hasRunActivity(state) ? <RunProgress compact /> : null}
-          <div className="dock">
-            <Journey active={active} />
-            <div className="dock-actions">
-              {view === "customer" ? <button type="button" className="text-btn" onClick={() => setView("pick")}>Assistant</button> : null}
-              {view === "pick" ? (
-                <button type="button" className="btn" data-testid="demo-continue" disabled={!preset} onClick={() => setView("customer")}>
-                  Continue <span aria-hidden="true">↗</span>
-                </button>
-              ) : (
-                <button type="button" className="btn" data-testid="run-audit" data-busy={state.running ? "true" : "false"} onClick={() => void start()} disabled={state.running || !preset}>
-                  {state.running ? "Running" : "Review & run"} <span aria-hidden="true">↗</span>
-                </button>
-              )}
-            </div>
+        <div className="dock">
+          <Journey active={active} />
+          <div className="dock-actions">
+            {view === "customer" ? <button type="button" className="text-btn" onClick={() => setView("pick")}>Assistant</button> : null}
+            {view === "pick" ? (
+              <button type="button" className="btn" data-testid="demo-continue" disabled={!preset} onClick={() => setView("customer")}>
+                Continue <span aria-hidden="true">↗</span>
+              </button>
+            ) : (
+              <button type="button" className="btn" data-testid="run-audit" data-busy={state.running ? "true" : "false"} onClick={() => void start()} disabled={state.running || !preset}>
+                {state.running ? "Running" : "Run four-city audit"} <span aria-hidden="true">↗</span>
+              </button>
+            )}
           </div>
-        </>
+        </div>
       )}
     >
       <div key={view} className="view-swap">
@@ -160,9 +158,6 @@ export function DemoStudio() {
                 <label>Name
                   <input aria-label="Customer name" value={state.profile.label} onChange={(event) => update({ profile: { ...state.profile, label: event.target.value } })} />
                 </label>
-                <label>City
-                  <input aria-label="City" data-testid="city-input" value={state.cities[0] ?? ""} onChange={(event) => update({ cities: [event.target.value, ...state.cities.slice(1)] })} />
-                </label>
                 <label>Age, optional
                   <input aria-label="Age" value={state.profile.age} onChange={(event) => update({ profile: { ...state.profile, age: event.target.value } })} />
                 </label>
@@ -178,7 +173,16 @@ export function DemoStudio() {
               </div>
             </section>
             <section className="brief-block">
-              <div className="brief-index"><span className="idx">03</span><div><h2>The question</h2><p>What would you like recommendations for?</p></div></div>
+              <div className="brief-index"><span className="idx">03</span><div><h2>Four cities</h2><p>One audit runs every configured city. Interests, age, budget, and language stay the same.</p></div></div>
+              <div>
+                <ul className="city-pills">
+                  {demoCities.map((city) => <li key={city}>{city}</li>)}
+                </ul>
+                <p className="muted">Budget {state.profile.budget || "not stated"} {state.profile.currency}. Language {state.profile.language || "not stated"}. Only the city in the request changes, so a difference is not produced by swapping interests.</p>
+              </div>
+            </section>
+            <section className="brief-block">
+              <div className="brief-index"><span className="idx">04</span><div><h2>The question</h2><p>What would you like recommendations for?</p></div></div>
               <div>
                 <label>Your request
                   <textarea aria-label="Question" value={state.taskQuestion} onChange={(event) => update({ taskQuestion: event.target.value })} />
@@ -192,7 +196,7 @@ export function DemoStudio() {
               <summary>Exact request</summary>
               {"error" in taskPreview ? <p>{taskPreview.error}</p> : <pre className="answer" data-testid="exact-request">{taskPreview.question}{"\n\n"}City: {taskPreview.city}{"\n"}Interests: {taskPreview.interests.map((item) => item.name).join(", ")}{"\n"}Budget: {taskPreview.budget} {taskPreview.currency}{"\n"}Language: {taskPreview.language}{"\n"}Requirements: {taskPreview.requirements}</pre>}
             </details>
-            <p className="muted">Estimated provider calls if you run the current cities: {estimate.total}. That is an estimate, not a charge.</p>
+            <p className="muted">Estimated provider calls for the four cities: {estimate.total}. That is an estimate, not a charge.</p>
           </>
         )}
       </div>
@@ -200,22 +204,6 @@ export function DemoStudio() {
         This run lives in browser memory only. Refreshing or closing the tab clears it. Inputs are sent to the configured Qloo and Gemini providers. TasteAudit does not promise that those providers retain nothing.
       </p>
       {formError ? <p className="error" role="alert">{formError}</p> : null}
-      {ready ? (
-        <section className="brief-block">
-          <div className="brief-index"><span className="idx">+</span><div><h2>Add another city</h2><p>The first result is in. You can add up to three cities, one at a time.</p></div></div>
-          <div className="row-actions">
-            <input aria-label="Another city" value={extraCity} onChange={(event) => setExtraCity(event.target.value)} />
-            <button type="button" className="btn ghost" data-testid="add-city" onClick={() => {
-              const city = extraCity.trim();
-              if (!city || cities.length >= 3) return;
-              update({ cities: [...cities, city] });
-              setExtraCity("");
-              void run([city]);
-            }}>Add city and run</button>
-          </div>
-        </section>
-      ) : null}
-      <ResultsBody showEmpty={false} />
     </Frame>
   );
 }

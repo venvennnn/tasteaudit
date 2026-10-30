@@ -8,7 +8,7 @@ export const LIMITS = {
   requirements: 800,
   favoriteName: 120,
   favorites: 8,
-  cities: 3,
+  cities: 4,
   city: 80,
   country: 80,
   budget: 40,
@@ -19,8 +19,8 @@ export const LIMITS = {
   recommendationsMin: 1,
   recommendationsMax: 5,
   recommendationsDefault: 3,
-  discoverTake: 15,
-  scorePoolMax: 20,
+  discoverTake: 30,
+  scorePoolMax: 40,
   searchTake: 6,
   textField: 800,
   reason: 400,
@@ -52,7 +52,7 @@ export const QLOO_TYPES = {
   place: "urn:entity:place",
 } as const;
 
-export const SYSTEM_PROMPT_VERSION = "tasteaudit-prompts-2026-10-30";
+export const SYSTEM_PROMPT_VERSION = "tasteaudit-prompts-2026-10-31";
 
 export const QLOO_HACKATHON_ORIGIN = "https://hackathon.api.qloo.com";
 

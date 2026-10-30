@@ -2,60 +2,90 @@
 
 import { useState } from "react";
 import Link from "next/link";
-import { Cover } from "@/components/Cover";
 import { useSession } from "@/components/SessionProvider";
-import type { ArtworkKind } from "@/lib/catalog/rank";
-import { AffinityChart, CoverageChart } from "@/components/Charts";
-import { affinityDelta, formatAffinity, formatRatio, formatSigned, meanObserved } from "@/lib/audit/metrics";
-import { ageBandLabel, ageToSupportedBand } from "@/lib/audit/age";
-import { parseAge } from "@/lib/audit/orchestrate";
-import { resultsReady, type CaseRecord, type ScoreRow } from "@/lib/session/state";
+import { geographyNote } from "@/lib/audit/geography";
+import { affinityDelta, formatAffinity3, formatRatio, formatSigned3, meanObserved } from "@/lib/audit/metrics";
+import { describeDiff, type SelectionDiff } from "@/lib/audit/select";
+import { activeCities, type CaseRecord, type CityPhase, type ScoreRow } from "@/lib/session/state";
 
 export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
-  const { state, compare, vote, record, download, importText, correctSeed } = useSession();
-  const cases = Object.values(state.cases);
-  if (!resultsReady(state) || cases.length === 0) {
+  const { state, compare, run, download, importText } = useSession();
+  const ordered = orderedCases(state.cases, activeCities(state));
+  if (ordered.length === 0) {
     if (!showEmpty) return null;
     return (
-      <section className="card" id="downloads" data-testid="results-empty">
+      <section id="downloads" data-testid="results-empty">
         <h2>No measured change yet</h2>
-        <p>Run a demo or a company audit in this tab. The affinity change appears after Qloo scores both the plain model’s names and the revision. Refreshing clears the run.</p>
+        <p>Run the four-city demo or a company audit in this tab. Refreshing clears the run.</p>
         <div className="row-actions">
-          <Link className="btn cyan" href="/demo">Try the demo</Link>
+          <Link className="btn" href="/demo">Try the demo</Link>
           <Link className="btn ghost" href="/audit">Audit your company</Link>
         </div>
         <ImportControl importText={importText} />
       </section>
     );
   }
-  const points = cases.map((item) => ({
-    city: item.city,
-    original: meanObserved(item.extracted.map((pick) => scoreFor(item, pick.entityId)?.affinity ?? null)).value,
-    revised: meanObserved(item.revisedSelections.map((pick) => scoreFor(item, pick.id)?.affinity ?? null)).value,
-  }));
+  const [first, ...rest] = ordered;
+  const evidence = ordered.some((item) => item.stages.score.status === "failed") ? "failed" : (first?.stages.score.status ?? "idle");
+  const failedCity = ordered.find((item) => item.phase === "failed" || item.stages.score.status === "failed" || item.stages.revise.status === "failed");
+  const completed = ordered.filter((item) => phaseOf(item) === "complete").length;
+  const failed = ordered.filter((item) => phaseOf(item) === "failed").length;
+  const improved = ordered.filter((item) => {
+    const outcome = cityOutcome(item);
+    return outcome.change != null && outcome.change > 0;
+  }).length;
+  const interests = state.profile.favorites.map((favorite) => favorite.name.trim()).filter(Boolean).join(", ");
   return (
-    <div className="stack" data-testid="results-ready">
-      {state.source === "imported" ? <p className="memory" data-testid="imported-label">Imported. Scores in this file are imported evidence, not a new provider verification.</p> : null}
-      <p className="muted">Recommendation pictures are the first catalog image for that name. A picture is not an affinity score.</p>
-      <div className="segment" aria-label="Result views">
-        <span className="on">Original vs revised</span>
-        {!state.compareAll && state.assistantMode === "simulate" ? <button type="button" data-testid="compare-all" onClick={() => void compare()}>All four approaches</button> : <span className={state.compareAll ? "on" : undefined}>All four approaches</span>}
-        <a href="#coverage">Coverage</a>
-      </div>
-      {cases.map((item) => <CaseView key={item.city} item={item} compareAll={state.compareAll} onVote={(choice) => vote(item.city, choice)} vote={state.votes[item.city]} onRecord={() => record(item.city)} canRecord={state.source !== "imported"} />)}
-      <section className="card">
-        <h2>Customer context</h2>
-        <p>{state.profile.label || "Customer"} · {state.company.name || "Unnamed company"} · {state.domain === "book" ? "Books" : "Places"}</p>
-        <p>{state.taskQuestion}</p>
-        <p>Interests: {state.profile.favorites.map((favorite) => favorite.name).filter(Boolean).join(", ") || "none"}. Age: {state.profile.age || "not stated"}. Language: {state.profile.language || "not stated"}. Budget: {state.profile.budget || "not stated"} {state.profile.currency}.</p>
-        <SeedList onCorrect={correctSeed} />
+    <div className="results-board" data-testid="results-ready">
+      <p className="results-kicker">{state.company.name || "Unnamed company"} · {state.domain === "book" ? "Books" : "Places"} · Age {state.profile.age || "not stated"}</p>
+      <h1 className="results-title">{ordered.length === 4 ? "One customer brief. Four city comparisons." : `One customer brief. ${ordered.length === 1 ? "One city comparison." : `${ordered.length} city comparisons.`}`}</h1>
+      <p className="results-brief">{state.simulatedLabel || state.company.purpose || "Customer brief"} · {interests || "No interests"} · {state.taskQuestion}</p>
+      <p className="results-brief">Cities: {ordered.map((item) => item.city).join(", ")}. Budget {state.profile.budget || "not stated"} {state.profile.currency}. Language {state.profile.language || "not stated"}.</p>
+      <p className="results-counts">{completed} complete · {failed} failed · {improved} with a higher revised mean. Counts come from this run.</p>
+      {state.seedStage.status === "failed" && state.seedStage.error ? <p className="error" role="alert">{state.seedStage.error.message}</p> : null}
+      {state.source === "imported" ? <p data-testid="imported-label">Imported. Scores in this file are imported evidence, not a new provider verification.</p> : null}
+      <span className="sr-only" data-testid="stage-evidence-check">{evidence}</span>
+      <section aria-label="Four city overview">
+        <table className="overview">
+          <thead>
+            <tr>
+              <th>City</th>
+              <th>Original affinity</th>
+              <th>Revised affinity</th>
+              <th>Change</th>
+              <th>Replacements</th>
+              <th>Coverage</th>
+            </tr>
+          </thead>
+          <tbody>
+            {ordered.map((item) => {
+              const outcome = cityOutcome(item);
+              const phase = phaseOf(item);
+              return (
+                <tr key={item.city} data-phase={phase}>
+                  <td data-label="City">{item.city}{phase !== "complete" ? <small>{phaseLabel(phase)}</small> : null}</td>
+                  <td data-label="Original affinity">{outcome.originalText}{scoreNote(phase, outcome.original.value)}</td>
+                  <td data-label="Revised affinity">{outcome.revisedText}{scoreNote(phase, outcome.revised.value)}</td>
+                  <td data-label="Change">{outcome.changeText}{outcome.change === null && phase === "complete" ? <small>Missing score</small> : null}</td>
+                  <td data-label="Replacements">{phase === "complete" ? outcome.replacements : "—"}</td>
+                  <td data-label="Coverage">
+                    {phase === "complete" ? `${formatRatio(outcome.originalCoverage)} → ${formatRatio(outcome.revisedCoverage)}` : "—"}
+                    {phase === "complete" && outcome.partial ? <small>Partial</small> : null}
+                    {phase === "failed" ? <button type="button" className="btn ghost" data-testid={failedCity?.city === item.city ? "retry-stage" : undefined} onClick={() => void run([item.city])}>Retry</button> : null}
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <CityDots rows={ordered.map((item) => ({ city: item.city, ...cityOutcome(item) }))} />
+        <p className="results-note">Both affinity numbers come from Qloo. Gemini does not produce a separate affinity score. The dots compare the two arms inside a city. They are not a ranking of cities, and they are not proof of customer satisfaction.</p>
       </section>
-      <section className="card" id="coverage">
-        <h2>Session charts</h2>
-        <p className="muted">Descriptive results for this session. Affinity is not customer preference accuracy or a purchase probability. Missing affinity is omitted, not plotted as zero.</p>
-        <AffinityChart points={points} />
-        <CoverageChart coverage={cases.map((item) => ({ city: item.city, numerator: item.metrics?.scoreCoverage.numerator ?? 0, denominator: item.metrics?.scoreCoverage.denominator ?? 0 }))} />
-      </section>
+      <CityCompare cases={ordered} domain={state.domain} />
+      {rest.length >= 0 && state.assistantMode === "simulate" && !state.compareAll ? (
+        <button type="button" className="text-btn" data-testid="compare-all" onClick={() => void compare()}>All four approaches</button>
+      ) : null}
+      {ordered.some((item) => item.refinedAnswer) ? <p>{ordered.map((item) => item.refinedAnswer).filter(Boolean).join(" ")}</p> : null}
       <section id="downloads">
         <h2>Download this session</h2>
         <div className="row-actions">
@@ -69,264 +99,237 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
   );
 }
 
+function orderedCases(cases: Record<string, CaseRecord>, cities: string[]): CaseRecord[] {
+  const used = new Set<string>();
+  const rows: CaseRecord[] = [];
+  for (const city of cities) {
+    const match = Object.entries(cases).find(([name]) => name.toLowerCase() === city.toLowerCase());
+    if (!match) continue;
+    used.add(match[0]);
+    rows.push(match[1]);
+  }
+  for (const [name, item] of Object.entries(cases)) {
+    if (!used.has(name)) rows.push(item);
+  }
+  return rows;
+}
+
+function phaseOf(item: CaseRecord): CityPhase {
+  const stages = Object.values(item.stages);
+  if (stages.some((stage) => stage.status === "running")) {
+    if (item.phase === "generating" || item.phase === "discovering" || item.phase === "evaluating") return item.phase;
+    return "evaluating";
+  }
+  if (item.phase === "failed" || stages.some((stage) => stage.status === "failed")) return "failed";
+  if (item.phase === "generating" || item.phase === "discovering" || item.phase === "evaluating") return item.phase;
+  if (item.stages.summarize.status === "complete") return "complete";
+  return "queued";
+}
+
+function scoreNote(phase: CityPhase, value: number | null) {
+  if (phase !== "complete" || value !== null) return null;
+  return <small>Missing score. Excluded from the mean.</small>;
+}
+
+function phaseLabel(phase: CityPhase): string {
+  if (phase === "generating") return "Generating";
+  if (phase === "discovering") return "Discovering";
+  if (phase === "evaluating") return "Evaluating";
+  if (phase === "failed") return "Failed";
+  if (phase === "complete") return "Complete";
+  return "Queued";
+}
+
+function cityOutcome(item: CaseRecord) {
+  const original = meanObserved(item.extracted.map((pick) => scoreFor(item, pick.entityId)?.affinity ?? null));
+  const revised = meanObserved(item.revisedSelections.map((pick) => scoreFor(item, pick.id)?.affinity ?? null));
+  const change = affinityDelta(original.value, revised.value);
+  const diff = diffFor(item);
+  const partial = (original.denominator > 0 && original.numerator < original.denominator) || (revised.denominator > 0 && revised.numerator < revised.denominator);
+  const missing = phaseOf(item) === "failed" || (original.value === null && revised.value === null);
+  return {
+    original,
+    revised,
+    change,
+    originalCoverage: original,
+    revisedCoverage: revised,
+    originalText: missing && original.value === null ? "—" : formatAffinity3(original.value),
+    revisedText: missing && revised.value === null ? "—" : formatAffinity3(revised.value),
+    changeText: change === null ? "—" : formatSigned3(change),
+    replacements: diff.replacementCount,
+    partial,
+    diff,
+  };
+}
+
+function diffFor(item: CaseRecord): SelectionDiff {
+  if (item.diagnostic?.diff) return item.diagnostic.diff;
+  return describeDiff({
+    original: item.extracted.filter((pick) => pick.entityId).map((pick) => ({ entityId: pick.entityId as string, name: pick.name })),
+    selected: item.revisedSelections.map((selection) => ({ entityId: selection.id, name: selection.name })),
+    newCandidateCount: item.discovered.length,
+    comparable: item.scores.some((row) => row.affinity !== null),
+  });
+}
+
+function geographyCopy(item: CaseRecord, domain: "book" | "place"): string {
+  if (!item.signals) return "Qloo scoring has not run for this city.";
+  const applied = item.signals.geographicSignalApplied;
+  const note = item.diagnostic?.geographyNote || geographyNote(domain, applied);
+  if (!applied) return note;
+  const locality = item.signals?.localityName ? ` Locality returned: ${item.signals.localityName}.` : " No locality name was returned.";
+  const coordinates = item.signals?.coordinatesReturned
+    ? ` Coordinates ${item.signals.localityLatitude ?? "—"}, ${item.signals.localityLongitude ?? "—"} came back from Qloo and were not checked against a separate gazetteer.`
+    : " Coordinates were not returned, so they were not checked against the requested area.";
+  return `${note}${locality}${coordinates}`;
+}
+
 function scoreFor(item: CaseRecord, id: string | null): ScoreRow | undefined {
   if (!id) return undefined;
   return item.scores.find((row) => row.entityId.toLowerCase() === id.toLowerCase());
 }
 
-function artBackground(name: string): string {
-  let hash = 0;
-  for (const char of name) hash = (hash * 33 + char.charCodeAt(0)) >>> 0;
-  const cool = 190 + (hash % 36);
-  const warm = 318 + ((hash >> 4) % 28);
-  return `linear-gradient(155deg, hsl(${cool} 72% 66%), hsl(${warm} 68% 60%))`;
-}
-
-function AffinityShift({ item }: { item: CaseRecord }) {
-  const original = meanObserved(item.extracted.map((pick) => scoreFor(item, pick.entityId)?.affinity ?? null));
-  const revised = meanObserved(item.revisedSelections.map((pick) => scoreFor(item, pick.id)?.affinity ?? null));
-  const delta = affinityDelta(original.value, revised.value);
-  const direction = delta == null ? "unscored" : Math.abs(delta) < 0.00005 ? "flat" : delta > 0 ? "up" : "down";
-  const sentence = delta == null
-    ? "Not enough scored names on both sides to measure a change. Missing affinity is left out, not treated as zero."
-    : direction === "flat"
-      ? "The mean did not change. The same recommendation keeps the same score. The mean moves when the revision chooses different names."
-      : direction === "up"
-        ? `The Qloo revision’s mean is higher by ${formatAffinity(delta)}. The same recommendation keeps the same score. The mean moved because the names changed.`
-        : `The Qloo revision’s mean is lower by ${formatAffinity(Math.abs(delta))}. The same recommendation keeps the same score. The mean moved because the names changed.`;
+function CityDots({ rows }: { rows: Array<{ city: string; original: { value: number | null; numerator: number; denominator: number }; revised: { value: number | null; numerator: number; denominator: number }; changeText: string }> }) {
+  const max = Math.max(1, ...rows.flatMap((row) => [row.original.value ?? 0, row.revised.value ?? 0]));
   return (
-    <section className="shift" data-testid="affinity-delta" data-direction={direction}>
-      <div className="shift-side">
-        <span>Plain model</span>
-        <strong>{formatAffinity(original.value)}</strong>
-        <span>{formatRatio(original)} scored</span>
-      </div>
-      <div className="shift-mid">
-        <span>Affinity change</span>
-        <strong className="shift-value">{delta == null ? "—" : formatSigned(delta)}</strong>
-        <span>mean observed affinity</span>
-      </div>
-      <div className="shift-side">
-        <span>With Qloo</span>
-        <strong>{formatAffinity(revised.value)}</strong>
-        <span>{formatRatio(revised)} scored</span>
-      </div>
-      <div className="shift-note">
-        <div className="meter" aria-hidden="true">
-          {original.value != null ? <i style={{ left: `${clampPercent(original.value)}%` }} /> : null}
-          {revised.value != null ? <i className="qloo" style={{ left: `${clampPercent(revised.value)}%` }} /> : null}
-        </div>
-        <p>{sentence} Affinity is a provider score for the signals that were sent, not a purchase probability.</p>
-      </div>
-    </section>
-  );
-}
-
-function clampPercent(value: number): number {
-  return Math.min(100, Math.max(0, value * 100));
-}
-
-function SeedList({ onCorrect }: { onCorrect: (query: string, entityId: string) => void }) {
-  const { state } = useSession();
-  if (state.seeds.length === 0) return null;
-  return (
-    <div>
-      <h3>Resolved interests</h3>
-      {state.seeds.map((seed) => (
-        <div key={seed.query} className="drawer">
-          <strong>{seed.query}</strong>{" "}
-          <span className={seed.ambiguous ? "pill warn" : "pill"}>{seed.status}{seed.ambiguous ? " · ambiguous" : ""}</span>
-          <p>{seed.name ?? "Unmatched"} {seed.types[0] ? `· ${seed.types[0]}` : ""}</p>
-          {seed.alternatives.length > 1 ? (
-            <label>Correct the match
-              <select aria-label={`Correct ${seed.query}`} defaultValue={seed.entityId ?? ""} onChange={(event) => { if (event.target.value) onCorrect(seed.query, event.target.value); }}>
-                <option value="">Keep the current match</option>
-                {seed.alternatives.map((item) => <option key={item.entityId} value={item.entityId}>{item.name}</option>)}
-              </select>
-            </label>
-          ) : null}
+    <div className="dot-chart" aria-label="Affinity comparison by city">
+      {rows.map((row) => (
+        <div className="dot-row" key={row.city}>
+          <span>{row.city}</span>
+          <div className="dot-axis">
+            {row.original.value != null ? <i className="dot original" style={{ left: `${(row.original.value / max) * 100}%` }} title={`${row.city} original ${formatAffinity3(row.original.value)}, coverage ${formatRatio(row.original)}, change ${row.changeText}`} /> : null}
+            {row.revised.value != null ? <i className="dot revised" style={{ left: `${(row.revised.value / max) * 100}%` }} title={`${row.city} revised ${formatAffinity3(row.revised.value)}, coverage ${formatRatio(row.revised)}, change ${row.changeText}`} /> : null}
+          </div>
         </div>
       ))}
-      <p className="muted">A correction clears dependent results. Run the case again afterward.</p>
+      <p className="dot-key"><i className="dot original" /> Original Gemini <i className="dot revised" /> Qloo-assisted Gemini</p>
     </div>
   );
 }
 
-function CaseView({ item, compareAll, vote, onVote, onRecord, canRecord }: { item: CaseRecord; compareAll: boolean; vote?: { choice: "a" | "b" | null; revealed: boolean }; onVote: (vote: { choice: "a" | "b"; revealed: boolean }) => void; onRecord: () => void; canRecord: boolean }) {
-  const [open, setOpen] = useState<string | null>(null);
-  const session = useSession();
-  const artKind: ArtworkKind = session.state.domain === "book" ? "book" : "any";
-  const band = ageToSupportedBand(parseAge(session.state.profile.age));
-  const openScore = open ? scoreFor(item, open) ?? item.scores.find((row) => row.name === open) : undefined;
+function CityCompare({ cases, domain }: { cases: CaseRecord[]; domain: "book" | "place" }) {
+  const [picked, setPicked] = useState(cases[0]?.city ?? "");
+  const city = cases.some((item) => item.city === picked) ? picked : cases[0]?.city ?? "";
+  const item = cases.find((entry) => entry.city === city);
+  if (!item) return null;
+  const diff = diffFor(item);
+  const showLists = diff.added.length > 0 || diff.removed.length > 0;
   return (
-    <section className="stack" data-testid={`case-${item.city}`}>
-      <AffinityShift item={item} />
-      <div className="row-actions">
-        <h2 style={{ margin: 0 }}>{item.city}</h2>
-        {item.recorded ? <p className="pill" data-testid="recorded-label">Recorded {item.recorded.at} · {item.recorded.model}</p> : null}
+    <section>
+      <div className="city-tabs" role="tablist" aria-label="Cities">
+        {cases.map((entry) => (
+          <button key={entry.city} type="button" role="tab" aria-selected={entry.city === city} onClick={() => setPicked(entry.city)}>{entry.city}</button>
+        ))}
       </div>
-      <div className="result-layout">
-        <article className="rec-panel">
-          <div className="rec-head">
-            <span className="idx">01</span>
-            <div>
-              <h3>Original assistant</h3>
-              <p>A general recommendation based on the original prompt.</p>
-            </div>
-          </div>
-          <div className="tile-grid">
-            {item.extracted.map((pick) => (
-              <button type="button" className="tile" key={pick.name} onClick={() => setOpen(pick.entityId ?? pick.name)}>
-                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true"><Cover name={pick.name} kind={artKind} fill /></span>
-                <strong>{pick.name}</strong>
-                <small>{pick.matchStatus}</small>
-                <small>Affinity {formatAffinity(scoreFor(item, pick.entityId)?.affinity ?? null)}</small>
-              </button>
-            ))}
-          </div>
-          <div className="answer" data-testid="original-answer">{item.originalAnswer}</div>
-        </article>
-        <article className="rec-panel">
-          <div className="rec-head">
-            <span className="idx">02</span>
-            <div>
-              <h3>Qloo-assisted revision</h3>
-              <p>A revision that can only choose from the scored allowlist.</p>
-            </div>
-          </div>
-          <div className="tile-grid">
-            {item.revisedSelections.map((pick) => (
-              <button type="button" className="tile" key={pick.id} data-testid="evidence-open" onClick={() => setOpen(pick.id)}>
-                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true"><Cover name={pick.name} kind={artKind} fill /></span>
-                <strong>{pick.name}</strong>
-                <small>Candidate from the allowlist</small>
-                <small>Affinity {formatAffinity(scoreFor(item, pick.id)?.affinity ?? null)}</small>
-              </button>
-            ))}
-          </div>
-          <div className="answer" data-testid="revised-answer">{item.revisedAnswer}</div>
-        </article>
-        <aside className="proof" {...(open ? { role: "dialog" as const, "aria-label": "Evidence" } : { "aria-label": "Behind the recommendation" })}>
-          {open ? <Evidence item={item} id={open} score={openScore} onClose={() => setOpen(null)} /> : <p className="muted">Open a recommendation to inspect its match, affinity, and what is still missing.</p>}
-        </aside>
+      <p className="results-note">{geographyCopy(item, domain)}</p>
+      {item.recorded ? <p data-testid="recorded-label">Recorded {item.recorded.at} · {item.recorded.model}</p> : null}
+      <div className="compare-cols">
+        <div>
+          <h2>Original Gemini</h2>
+          {item.extracted.length === 0 ? <p>Waiting for the original recommendations.</p> : item.extracted.map((pick) => (
+            <RecommendationCard key={`${pick.name}-${pick.entityId ?? "none"}`} item={item} name={pick.name} entityId={pick.entityId} badge={badgeFor(diff, pick.entityId, "original")} detail={pick.matchStatus} />
+          ))}
+        </div>
+        <div>
+          <h2>Qloo-assisted Gemini</h2>
+          {item.revisedSelections.length === 0 ? <p>{phaseOf(item) === "failed" ? "This city failed before a revision was selected." : "The revised list appears after scoring."}</p> : item.revisedSelections.map((pick) => (
+            <RecommendationCard key={pick.id} item={item} name={pick.name} entityId={pick.id} badge={badgeFor(diff, pick.id, "revised")} detail={pick.reason} openEvidence />
+          ))}
+        </div>
       </div>
-      {item.signals && !item.signals.geographicSignalApplied ? <p className="memory">A city filter was not applied to Qloo. Book scores are not city-conditioned. The city was still sent to Gemini.</p> : null}
-      {item.signals?.geographicSignalApplied ? <p>Place filter: {item.signals.localityName ?? "locality not resolved"}. {item.signals.coordinatesReturned ? "The provider returned coordinates. TasteAudit did not add a second geocoder." : "Coordinates were not returned."}</p> : null}
-      {compareAll ? <Baselines item={item} /> : null}
-      <Metrics item={item} />
-      <Methods item={item} ageLabel={band ? ageBandLabel(band) : null} />
-      <Review item={item} vote={vote} onVote={onVote} />
-      {canRecord && item.stages.summarize.status === "complete" && !item.recorded ? <button type="button" className="btn ghost" onClick={onRecord}>Keep as recorded for this session</button> : null}
-      {item.warnings.length > 0 ? <ul>{item.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul> : null}
+      <section className="what-changed">
+        <h2>What changed?</h2>
+        {showLists ? (
+          <>
+            <p>{diff.retainedCount} retained · {diff.replacementCount} replaced.</p>
+            {diff.removed.length > 0 ? <p>Removed: {diff.removed.map((row) => row.name).join(", ")}.</p> : null}
+            {diff.added.length > 0 ? <p>Added: {diff.added.map((row) => `${row.name}. ${row.reason}`).join(" ")}</p> : null}
+            {diff.retained.some((row) => row.fromRank !== row.toRank) ? <p>Rank changes: {diff.retained.filter((row) => row.fromRank !== row.toRank).map((row) => `${row.name} moved from ${row.fromRank} to ${row.toRank}`).join("; ")}.</p> : null}
+          </>
+        ) : <p>{diff.summary}</p>}
+        {diff.summary === "Insufficient evidence to compare." && showLists ? <p>Insufficient evidence to compare.</p> : null}
+      </section>
+      <ol className="short-answer">
+        {item.revisedSelections.map((pick, index) => (
+          <li key={pick.id}><strong>{index + 1}. {pick.name}</strong> {pick.reason} Practical facts for this name stay unverified unless a constraint check recorded a pass or fail.</li>
+        ))}
+      </ol>
+      <details>
+        <summary>Full answers</summary>
+        <h3>Original</h3>
+        <div className="answer">{item.originalAnswer}</div>
+        <h3>Revised</h3>
+        <div className="answer" data-testid="revised-answer">{item.revisedAnswer}</div>
+      </details>
+      <details>
+        <summary>Inspect selection</summary>
+        <p>{item.diagnostic?.summary ?? diff.summary}</p>
+        <p>{item.diagnostic?.geographyNote}</p>
+        <p>Original ids: {item.diagnostic?.originalIds.join(", ") || "none"}.</p>
+        <p>Discovered ids: {item.diagnostic?.discoveredIds.join(", ") || "none"}.</p>
+        <p>Eligible ids: {item.diagnostic?.eligibleIds.join(", ") || "none"}.</p>
+        <p>Selected ids: {item.diagnostic?.selectedIds.join(", ") || "none"}.</p>
+        <p>New candidates {item.diagnostic?.newCandidateCount ?? "—"}. Retained {diff.retainedCount}. Replaced {diff.replacementCount}.</p>
+        <ul>{(item.diagnostic?.scoringSignals ?? item.signals?.qloo ?? []).map((signal) => <li key={signal.name}>{signal.name}: {signal.value}</li>)}</ul>
+        <p>Candidate pool</p>
+        <ul>{item.scores.map((row) => <li key={row.entityId}>{row.name} · {row.entityId} · {formatAffinity3(row.affinity)} · {row.sources.join(", ") || "unspecified"}</li>)}</ul>
+        <ul>{item.diagnostic?.exclusions.map((row) => <li key={row.entityId}>{row.name}: {row.reason}</li>)}</ul>
+        <ul>{(item.signals?.withheld ?? []).map((row) => <li key={row.name}>{row.name}: {row.reason}</li>)}</ul>
+        {item.originalPrompt ? <pre className="answer">{item.originalPrompt}</pre> : null}
+        {item.revisedPrompt ? <pre className="answer">{item.revisedPrompt}</pre> : null}
+      </details>
     </section>
   );
 }
 
-function Evidence({ item, id, score, onClose }: { item: CaseRecord; id: string; score: ScoreRow | undefined; onClose: () => void }) {
-  const { download } = useSession();
-  const [tab, setTab] = useState<"evidence" | "answer" | "raw">("evidence");
-  const resolved = score ?? scoreFor(item, id) ?? item.scores.find((row) => row.name === id);
-  const checks = resolved ? item.checksById[resolved.entityId] ?? [] : [];
-  const failed = checks.some((check) => check.verdict === "fail");
-  const contributions = resolved?.explainability.status === "available"
-    ? resolved.explainability.contributions.map((part) => `${part.name ?? part.entityId ?? "signal"} ${part.value}`).join(", ")
-    : "Shown when returned";
+function badgeFor(diff: SelectionDiff, entityId: string | null, arm: "original" | "revised"): string {
+  if (!entityId) return "Unresolved";
+  const key = entityId.toLowerCase();
+  if (arm === "original" && diff.removed.some((row) => row.entityId.toLowerCase() === key)) return "Removed";
+  if (arm === "revised" && diff.added.some((row) => row.entityId.toLowerCase() === key)) return "Added";
+  const retained = diff.retained.find((row) => row.entityId.toLowerCase() === key);
+  if (retained && retained.fromRank !== retained.toRank) return "Reordered";
+  if (retained) return "Retained";
+  return arm === "original" ? "Original" : "Selected";
+}
+
+function RecommendationCard({ item, name, entityId, badge, detail, openEvidence = false }: { item: CaseRecord; name: string; entityId: string | null; badge: string; detail: string; openEvidence?: boolean }) {
+  const { state } = useSession();
+  const score = scoreFor(item, entityId);
+  const category = score?.tags[0] || score?.types[0]?.replace("urn:entity:", "").replaceAll("_", " ") || (state.domain === "book" ? "Book" : "Place");
+  const [open, setOpen] = useState(false);
   return (
-    <div className="proof-sheet">
-      <p className="kicker">Candidate</p>
-      <h3>{resolved?.name ?? id}</h3>
-      <div className="proof-tabs" role="tablist" aria-label="Candidate detail">
-        <button type="button" role="tab" aria-selected={tab === "evidence"} onClick={() => setTab("evidence")}>Evidence</button>
-        <button type="button" role="tab" aria-selected={tab === "answer"} onClick={() => setTab("answer")}>Original answer</button>
-        <button type="button" role="tab" aria-selected={tab === "raw"} onClick={() => setTab("raw")}>Raw response</button>
+    <article className="rec-card" data-domain={state.domain}>
+      {score?.imageUrl ? (
+        // eslint-disable-next-line @next/next/no-img-element
+        <img className="rec-thumb" src={score.imageUrl} alt="" />
+      ) : <span className="rec-thumb placeholder" aria-hidden="true" />}
+      <div>
+        <strong>{name}</strong>
+        <p>{category}</p>
+        <p>Affinity {formatAffinity3(score?.affinity ?? null)} <span className="badge">{badge}</span></p>
+        <p>{detail}</p>
+        {openEvidence ? <button type="button" className="text-btn" data-testid="evidence-open" onClick={() => setOpen(true)}>Inspect evidence</button> : null}
       </div>
-      {tab === "evidence" ? (
-        <>
-          <span className="tile-art proof-art" style={{ background: artBackground(resolved?.name ?? id) }} aria-hidden="true" />
-          <dl className="proof-table">
-            <div><dt>Entity identity</dt><dd>{resolved?.types.join(", ") || "Review match"} · {resolved?.evidenceOrigin === "imported" ? "Imported evidence" : resolved?.evidenceOrigin === "provider" ? "Provider-signed" : "Unsigned"}</dd></div>
-            <div><dt>Qloo affinity</dt><dd>{formatAffinity(resolved?.affinity ?? null)}</dd></div>
-            <div><dt>Input contributions</dt><dd>{contributions}</dd></div>
-            <div><dt>Source timestamp</dt><dd>{resolved?.retrievedAt ?? "Included in live results"}</dd></div>
-          </dl>
-          {resolved?.explainability.raw && resolved.explainability.status === "unavailable" ? <p>A payload was returned, but it had no numeric contributions to display.</p> : null}
-          {failed ? <p className="error">A verified constraint failed. Affinity does not override that failure.</p> : null}
-          {checks.length > 0 ? <ul>{checks.map((check) => <li key={check.label}>{check.label}: {check.verdict}. {check.reason}</li>)}</ul> : null}
-          <p className="muted">Scores support a hypothesis. They do not establish customer satisfaction. Affinity is not a purchase probability.</p>
-        </>
-      ) : null}
-      {tab === "answer" ? <div className="answer">{item.originalAnswer}</div> : null}
-      {tab === "raw" ? <p>TasteAudit keeps the scored fields, not the raw provider payload. Affinity {formatAffinity(resolved?.affinity ?? null)}. Explainability {resolved?.explainability.status ?? "unavailable"}.</p> : null}
-      <div className="row-actions">
-        <button type="button" className="btn" onClick={onClose}>Back to comparison <span aria-hidden="true">↗</span></button>
-        <button type="button" className="btn ghost" onClick={() => download("json")}>Download evidence</button>
-      </div>
-    </div>
+      {open && entityId ? <EvidenceDialog item={item} entityId={entityId} onClose={() => setOpen(false)} /> : null}
+    </article>
   );
 }
 
-function Baselines({ item }: { item: CaseRecord }) {
+function EvidenceDialog({ item, entityId, onClose }: { item: CaseRecord; entityId: string; onClose: () => void }) {
+  const { state } = useSession();
+  const score = scoreFor(item, entityId);
+  const checks = item.checksById[entityId] ?? [];
   return (
-    <div className="card stack">
-      <h3>All four approaches</h3>
-      <p>Self-refinement uses no Qloo evidence. Reranking changes order only, so it does not raise the mean of that same complete set.</p>
-      {item.refinedAnswer ? <div className="answer">{item.refinedAnswer}</div> : <p>Self-refinement is unavailable for a pasted answer because the original model is unknown.</p>}
-      <p>{item.rerankNote}</p>
-      <ol>{item.rerankIds.map((id) => <li key={id}>{scoreFor(item, id)?.name ?? id} · {formatAffinity(scoreFor(item, id)?.affinity ?? null)}</li>)}</ol>
-    </div>
-  );
-}
-
-function Metrics({ item }: { item: CaseRecord }) {
-  const metrics = item.metrics;
-  if (!metrics) return null;
-  const original = meanObserved(item.extracted.map((pick) => scoreFor(item, pick.entityId)?.affinity ?? null));
-  const revised = meanObserved(item.revisedSelections.map((pick) => scoreFor(item, pick.id)?.affinity ?? null));
-  const delta = affinityDelta(original.value, revised.value);
-  return (
-    <div className="table-wrap">
-      <table>
-        <caption>Coverage uses numerator and denominator. Means skip missing affinity.</caption>
-        <tbody>
-          <tr><th>Interest resolution</th><td>{formatRatio(metrics.entityResolution)}</td></tr>
-          <tr><th>Recommendation resolution</th><td>{formatRatio(metrics.pickResolution)}</td></tr>
-          <tr><th>Score coverage</th><td>{formatRatio(metrics.scoreCoverage)}</td></tr>
-          <tr><th>Mean affinity, plain model</th><td>{formatAffinity(original.value)} ({formatRatio(original)})</td></tr>
-          <tr><th>Mean affinity, Qloo revision</th><td>{formatAffinity(revised.value)} ({formatRatio(revised)})</td></tr>
-          <tr><th>Affinity change</th><td>{formatSigned(delta)}</td></tr>
-          <tr><th>Retention</th><td>{formatRatio(metrics.retention)}</td></tr>
-          <tr><th>Constraint checks with a pass or fail</th><td>{formatRatio(metrics.constraintCoverage)}</td></tr>
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Methods({ item, ageLabel }: { item: CaseRecord; ageLabel: string | null }) {
-  return (
-    <details className="card">
-      <summary>Methods for this case</summary>
-      <p>Model: {item.observedModel ?? "Unknown for a pasted answer"}. {item.originalProvenance?.temperature != null ? `Temperature ${item.originalProvenance.temperature}, top-p ${item.originalProvenance.topP}.` : "Temperature and top-p were not sent. Gemini 3.8 does not accept them."} Prompt {item.originalProvenance?.systemPromptVersion ?? "server prompt"}.</p>
-      {ageLabel ? <p>Explicit age was mapped to the documented band {ageLabel} and that band was eligible to send.</p> : <p>No age band was sent.</p>}
-      <ul>{item.signals?.qloo.map((signal) => <li key={signal.name}>{signal.name}: {signal.value}</li>)}</ul>
-      <ul>{item.signals?.withheld.map((signal) => <li key={signal.name}>{signal.name}: {signal.reason}</li>)}</ul>
-    </details>
-  );
-}
-
-function Review({ item, vote, onVote }: { item: CaseRecord; vote?: { choice: "a" | "b" | null; revealed: boolean }; onVote: (vote: { choice: "a" | "b"; revealed: boolean }) => void }) {
-  if (!item.originalAnswer || !item.revisedAnswer) return null;
-  const revealed = vote?.revealed;
-  return (
-    <div className="card">
-      <h3>Informal session review</h3>
-      <p className="muted">This is an informal preference in this session, not statistically independent validation. No significance test is computed. Arm names and scores stay off these two cards until you vote. The labeled cards above are the audit itself.</p>
-      {!revealed ? (
-        <div className="vote-grid">
-          <button type="button" className="choice" data-testid="vote-a" onClick={() => onVote({ choice: "a", revealed: true })}><strong>A</strong><span className="answer">{item.originalAnswer}</span></button>
-          <button type="button" className="choice" data-testid="vote-b" onClick={() => onVote({ choice: "b", revealed: true })}><strong>B</strong><span className="answer">{item.revisedAnswer}</span></button>
-        </div>
-      ) : <p>You preferred {vote?.choice === "a" ? "the original" : "the revision"}.</p>}
+    <div className="evidence-dialog" role="dialog" aria-label="Evidence">
+      {state.source === "imported" ? <p>Imported evidence</p> : null}
+      <h3>{score?.name ?? entityId}</h3>
+      <p>Identity {item.extracted.find((pick) => pick.entityId === entityId)?.matchStatus ?? "selected"}. {item.extracted.find((pick) => pick.entityId === entityId)?.ambiguous ? "The match was ambiguous and was not treated as confirmed." : "Ambiguous matches stay labeled."}</p>
+      <p>Affinity {formatAffinity3(score?.affinity ?? null)}. Explainability {score?.explainability.status ?? "unavailable"}.</p>
+      <ul>{score?.explainability.contributions.map((part, index) => <li key={`${part.entityId}-${index}`}>{part.name ?? part.entityId ?? "signal"} {part.value}</li>)}</ul>
+      <ul>{checks.map((check) => <li key={check.label}>{check.label}: {check.verdict}. {check.reason}</li>)}</ul>
+      <p>Hours, price, stock, and accessibility stay unverified unless a check above says otherwise.</p>
+      <button type="button" className="btn" onClick={onClose}>Close</button>
     </div>
   );
 }
@@ -334,7 +337,7 @@ function Review({ item, vote, onVote }: { item: CaseRecord; vote?: { choice: "a"
 function ImportControl({ importText }: { importText: (text: string) => string | null }) {
   const [message, setMessage] = useState<string | null>(null);
   return (
-    <label style={{ marginTop: 12 }}>
+    <label>
       Import a downloaded run
       <input data-testid="import-json" type="file" accept="application/json,.json" onChange={(event) => {
         const file = event.target.files?.[0];
