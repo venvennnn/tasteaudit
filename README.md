@@ -37,7 +37,7 @@ Fill the server variables in `.env.local`. None of them use a `NEXT_PUBLIC_` pre
 npm run dev
 ```
 
-Open `http://localhost:3000`. The demo runs four configured cities from one action. The same customer brief is used in every city. The demo presets are inputs, not completed audits. “Simulated concierge” and “Simulated bookseller” are unaffiliated with Marriott and Barnes & Noble.
+Open `http://localhost:3000`. The place demo compares four cities with `filter.location.query`. The book demo compares four readers with different explicit interests and does not send a city to Qloo. The demo presets are inputs, not completed audits. “Simulated concierge” and “Simulated bookseller” are unaffiliated with Marriott and Barnes & Noble.
 
 ```bash
 npm run smoke

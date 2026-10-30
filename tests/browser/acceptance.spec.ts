@@ -207,4 +207,67 @@ test.describe("acceptance", () => {
     await expect(page.getByRole("link", { name: "Skip to content" })).toBeFocused();
     await page.keyboard.press("Enter");
   });
+
+  test("compares book readers by interest and keeps place cities geographic", async ({ page }) => {
+    const dune = "33333333-3333-3333-3333-333333333333";
+    const other = "44444444-4444-4444-4444-444444444444";
+    const book = "55555555-5555-5555-5555-555555555555";
+    await page.route("**/api/**", async (route) => {
+      const url = route.request().url();
+      const body = route.request().postDataJSON() as { name?: string; seedIds?: string[] } | null;
+      const json = (payload: unknown) => route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(ok(payload)) });
+      if (url.includes("/api/qloo/search")) {
+        const id = body?.name === "The Godfather" || body?.name === "Miles Davis" || body?.name === "Pride and Prejudice" ? other : dune;
+        return json({
+          candidates: [{ entityId: id, name: body?.name ?? "Dune", types: ["urn:entity:book"], popularity: 0.5 }],
+          match: { status: "exact", ambiguous: false, entity: { entityId: id, name: body?.name ?? "Dune", types: ["urn:entity:book"] } },
+        });
+      }
+      if (url.includes("/api/gemini/original")) return json({ answer: "Read Dune tonight." });
+      if (url.includes("/api/gemini/extract")) return json({ picks: [{ name: "Dune", quote: "Dune" }] });
+      if (url.includes("/api/qloo/discover")) return json({ entities: [{ entityId: book, name: "Quiet Book", types: ["urn:entity:book"] }], geographicSignalApplied: false, locality: null });
+      if (url.includes("/api/qloo/score")) {
+        const affinity = body?.seedIds?.includes(other) ? 0.2 : 0.81;
+        return json({
+          entities: [
+            { entityId: dune, name: "Dune", types: ["urn:entity:book"], affinity: 0.2, explainability: { status: "unavailable", contributions: [], warning: null, raw: null }, language: null, description: null, tags: [], evidenceOrigin: "unsigned", envelope: null },
+            { entityId: book, name: "Quiet Book", types: ["urn:entity:book"], affinity, explainability: { status: "unavailable", contributions: [], warning: null, raw: null }, language: null, description: null, tags: [], evidenceOrigin: "unsigned", envelope: null },
+          ],
+          missingIds: [],
+          geographicSignalApplied: false,
+          locality: null,
+          signing: false,
+        });
+      }
+      if (url.includes("/api/gemini/repair")) return json({ selections: [{ id: book, reason: "Quiet Book fits the supplied affinity." }], answer: "Revised: Quiet Book." });
+      return route.fulfill({ status: 500, contentType: "application/json", body: JSON.stringify({ code: "upstream", message: "Unexpected route", stage: "test", retryable: false, requestId: "x" }) });
+    });
+
+    await page.goto("/demo");
+    await page.getByTestId("preset-bookseller").click();
+    await page.getByTestId("demo-continue").click();
+    await expect(page.getByRole("heading", { name: "Reader interests" })).toBeVisible();
+    await expect(page.getByText("Interest-based affinity. City was not applied to Qloo scoring.").first()).toBeVisible();
+    for (const reader of ["Ada", "Ben", "Chi", "Noor"]) {
+      await expect(page.getByRole("heading", { name: reader, exact: true })).toBeVisible();
+    }
+    await expect(page.getByText("Chicago")).toHaveCount(0);
+    await page.getByTestId("run-audit").click();
+    await expect(page.getByRole("heading", { name: /Reader interest comparison/ })).toBeVisible();
+    await expect(page.getByTestId("experiment-label")).toContainText("Book experiment: different explicit interests.");
+    await expect(page.getByTestId("experiment-label")).toContainText("Interest-based affinity. City was not applied to Qloo scoring.");
+    await expect(page.getByRole("heading", { name: "One customer brief. Four city comparisons." })).toHaveCount(0);
+    for (const reader of ["Ada", "Ben", "Chi", "Noor"]) {
+      await expect(page.getByRole("tab", { name: reader })).toBeVisible();
+    }
+    await expect(page.getByText("0.810").first()).toBeVisible();
+    await page.getByTestId("evidence-open").first().click();
+    const dialog = page.getByRole("dialog", { name: "Evidence" });
+    await expect(dialog.getByText("Qloo affinity returned")).toBeVisible();
+    await expect(dialog.getByText("Explainability unavailable")).toBeVisible();
+    await expect(dialog.getByText("Price, edition and stock unverified")).toBeVisible();
+    await expect(dialog.getByText(/not authenticated/i)).toHaveCount(0);
+    const overflow = await page.evaluate(() => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1);
+    expect(overflow).toBe(true);
+  });
 });

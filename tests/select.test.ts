@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { affinityDelta, meanObserved } from "@/lib/audit/metrics";
+import { affinityDelta, formatAffinity3, meanObserved } from "@/lib/audit/metrics";
 import { geographyNote } from "@/lib/audit/geography";
 import { selectRevised, type Selectable } from "@/lib/audit/select";
 import { insightsParameters } from "@/lib/providers/qloo";
@@ -84,7 +84,10 @@ describe("selection policy", () => {
       candidates: [row({ entityId: a, name: "Dune", affinity: null, sources: ["original"] })],
     });
     expect(result.diff.summary).toBe("Insufficient evidence to compare.");
-    expect(geographyNote("book", false)).toBe("Affinity reflects explicit interests. Location was not applied to Qloo scoring.");
+    expect(geographyNote("book", false)).toBe("Interest-based affinity. City was not applied to Qloo scoring.");
+    expect(formatAffinity3(null)).toBe("Unavailable");
+    expect(formatAffinity3(0.895)).toBe("0.895");
+    expect(meanObserved([0.895, null, 0.876]).value).toBeCloseTo((0.895 + 0.876) / 2);
     expect(geographyNote("place", true)).toMatch(/locality candidate filter/);
     expect(geographyNote("place", true)).toMatch(/does not measure local market preferences/);
     expect(DEMO_PLACE_CITIES).toHaveLength(4);

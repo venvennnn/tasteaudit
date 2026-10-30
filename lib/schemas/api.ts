@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { EVIDENCE_NOTES } from "@/lib/audit/evidence";
 import { DOMAINS, FAVORITE_KINDS, LIMITS } from "@/lib/schemas/limits";
 
 export const uuidSchema = z
@@ -68,6 +69,7 @@ export const evidenceInputSchema = z.object({
   explainability: z.unknown().optional(),
   envelope: z.string().max(8000).optional(),
   evidenceOrigin: z.enum(["provider", "imported", "unsigned"]),
+  notes: z.array(z.enum(EVIDENCE_NOTES)).max(EVIDENCE_NOTES.length).optional(),
 }).strict();
 
 export const repairRequestSchema = z.object({

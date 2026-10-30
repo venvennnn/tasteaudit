@@ -3,7 +3,8 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useSession } from "@/components/SessionProvider";
-import { geographyNote } from "@/lib/audit/geography";
+import { evidenceStatuses, priceEditionStockChecked, QLOO_AFFINITY_RETURNED } from "@/lib/audit/evidence";
+import { geographyNote, INTEREST_AFFINITY_NOTE } from "@/lib/audit/geography";
 import { affinityDelta, formatAffinity3, formatRatio, formatSigned3, meanObserved } from "@/lib/audit/metrics";
 import { describeDiff, type SelectionDiff } from "@/lib/audit/select";
 import { activeCities, type CaseRecord, type CityPhase, type ScoreRow } from "@/lib/session/state";
@@ -36,25 +37,40 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
     const outcome = cityOutcome(item);
     return outcome.change != null && outcome.change > 0;
   }).length;
-  const interests = state.profile.favorites.map((favorite) => favorite.name.trim()).filter(Boolean).join(", ");
+  const readers = state.comparison === "readers";
+  const interests = readers
+    ? state.readers.map((reader) => `${reader.label}: ${reader.favorites.map((favorite) => favorite.name.trim()).filter(Boolean).join(", ")}`).join(" · ")
+    : state.profile.favorites.map((favorite) => favorite.name.trim()).filter(Boolean).join(", ");
+  const title = readers
+    ? `Reader interest comparison. ${ordered.length === 1 ? "One explicit interest list." : `${ordered.length} explicit interest lists.`}`
+    : state.domain === "book"
+      ? "One interest list. City was not applied to Qloo scoring."
+      : ordered.length === 4
+        ? "One customer brief. Four city comparisons."
+        : `One customer brief. ${ordered.length === 1 ? "One city comparison." : `${ordered.length} city comparisons.`}`;
   return (
     <div className="results-board" data-testid="results-ready">
-      <p className="results-kicker">{state.company.name || "Unnamed company"} · {state.domain === "book" ? "Books" : "Places"} · Age {state.profile.age || "not stated"}</p>
-      <h1 className="results-title">{ordered.length === 4 ? "One customer brief. Four city comparisons." : `One customer brief. ${ordered.length === 1 ? "One city comparison." : `${ordered.length} city comparisons.`}`}</h1>
+      <p className="results-kicker">{state.company.name || "Unnamed company"} · {readers ? "Book interest comparison" : state.domain === "book" ? "Books" : "Place city comparison"} · Age {state.profile.age || "not stated"}</p>
+      <h1 className="results-title">{title}</h1>
+      <p className="results-brief" data-testid="experiment-label">{readers
+        ? `Book experiment: different explicit interests. ${INTEREST_AFFINITY_NOTE}`
+        : state.domain === "place"
+          ? "Place experiment: city comparison. filter.location.query limits candidates. It does not condition affinity."
+          : INTEREST_AFFINITY_NOTE}</p>
       <p className="results-brief">{state.simulatedLabel || state.company.purpose || "Customer brief"} · {interests || "No interests"} · {state.taskQuestion}</p>
-      <p className="results-brief">Cities: {ordered.map((item) => item.city).join(", ")}. Budget {state.profile.budget || "not stated"} {state.profile.currency}. Language {state.profile.language || "not stated"}.</p>
+      <p className="results-brief">{readers ? "Readers" : "Cities"}: {ordered.map((item) => item.city).join(", ")}. Budget {state.profile.budget || "not stated"} {state.profile.currency}. Language {state.profile.language || "not stated"}.</p>
       <p className="results-counts">{completed} complete · {failed} failed · {improved} with a higher revised mean. Counts come from this run.</p>
       {state.seedStage.status === "failed" && state.seedStage.error ? <p className="error" role="alert">{state.seedStage.error.message}</p> : null}
       {state.source === "imported" ? <p data-testid="imported-label">Imported. Scores in this file are imported evidence, not a new provider verification.</p> : null}
       <span className="sr-only" data-testid="stage-evidence-check">{evidence}</span>
-      <section className="ta-panel" aria-label="Four city overview">
+      <section className="ta-panel" aria-label={readers ? "Reader overview" : "City overview"}>
         <div className="ta-panel-head">
           <div>
-            <h2>1. Four-city overview</h2>
-            <p>Each card is this run’s own original mean, revised mean, and replacement count.</p>
+            <h2>{readers ? "1. Reader overview" : ordered.length === 4 && state.domain === "place" ? "1. Four-city overview" : "1. Case overview"}</h2>
+            <p>{readers ? "Each card is one explicit interest list. Matching scores are not four local-market profiles." : "Each card is this run’s own original mean, revised mean, and replacement count."}</p>
           </div>
         </div>
-        <div className="city-card-grid" role="tablist" aria-label="Cities">
+        <div className="city-card-grid" role="tablist" aria-label={readers ? "Readers" : "Cities"}>
           {ordered.map((item) => {
             const outcome = cityOutcome(item);
             const phase = phaseOf(item);
@@ -62,8 +78,8 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
               <article key={item.city} className="city-score-card" data-selected={item.city === selectedCity ? "true" : "false"} data-phase={phase}>
                 <button type="button" role="tab" aria-selected={item.city === selectedCity} onClick={() => setPicked(item.city)}>{item.city}</button>
                 <p>{phase === "complete" ? "Complete" : phaseLabel(phase)}</p>
-                <p>Original {outcome.originalText}{scoreNote(phase, outcome.original.value)}</p>
-                <p>Revised {outcome.revisedText}{scoreNote(phase, outcome.revised.value)}</p>
+                <p>Original {shownAffinity(phase, outcome.original.value)}{scoreNote(phase, outcome.original.value)}</p>
+                <p>Revised {shownAffinity(phase, outcome.revised.value)}{scoreNote(phase, outcome.revised.value)}</p>
                 <p>Change {outcome.changeText}</p>
                 <p>Replacements {phase === "complete" ? outcome.replacements : "—"}</p>
                 <p>Coverage {phase === "complete" ? `${formatRatio(outcome.originalCoverage)} → ${formatRatio(outcome.revisedCoverage)}` : "—"}{phase === "complete" && outcome.partial ? " Partial" : ""}</p>
@@ -73,10 +89,12 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
           })}
         </div>
         <CityDots rows={ordered.map((item) => ({ city: item.city, ...cityOutcome(item) }))} />
-        <p className="results-note">Both affinity numbers come from Qloo. Gemini does not produce a separate affinity score. The dots compare the two arms inside a city. They are not a ranking of cities, and they are not proof of customer satisfaction.</p>
+        <p className="results-note">{readers
+          ? "Both affinity numbers come from Qloo query.affinity for that reader’s interests. Gemini does not produce a separate affinity score. These cards are not four local-market preference profiles."
+          : "Both affinity numbers come from Qloo. Gemini does not produce a separate affinity score. The dots compare the two arms inside a case. They are not a ranking of cities, and they are not proof of customer satisfaction."}</p>
         <SameRequestNote cases={ordered} />
       </section>
-      <CityCompare cases={ordered} domain={state.domain} city={selectedCity} />
+      <CityCompare cases={ordered} domain={state.domain} city={selectedCity} unit={readers ? "reader" : "city"} />
       {rest.length >= 0 && state.assistantMode === "simulate" && !state.compareAll ? (
         <button type="button" className="text-btn" data-testid="compare-all" onClick={() => void compare()}>All four approaches</button>
       ) : null}
@@ -123,7 +141,13 @@ function phaseOf(item: CaseRecord): CityPhase {
 
 function scoreNote(phase: CityPhase, value: number | null) {
   if (phase !== "complete" || value !== null) return null;
-  return <small>Missing score. Excluded from the mean.</small>;
+  return <small>Excluded from the mean.</small>;
+}
+
+function shownAffinity(phase: CityPhase, value: number | null): string {
+  if (typeof value === "number" && Number.isFinite(value)) return formatAffinity3(value);
+  if (phase === "complete" || phase === "failed") return "Unavailable";
+  return "—";
 }
 
 function phaseLabel(phase: CityPhase): string {
@@ -168,7 +192,7 @@ function diffFor(item: CaseRecord): SelectionDiff {
 }
 
 function formatFull(value: number | null | undefined): string {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Unavailable";
   return String(value);
 }
 
@@ -176,7 +200,7 @@ function SameRequestNote({ cases }: { cases: CaseRecord[] }) {
   const keys = cases.map((item) => item.diagnostic?.requestKey).filter((key): key is string => Boolean(key));
   if (keys.length < 2 || keys.length !== cases.length) return null;
   if (new Set(keys).size !== 1) return null;
-  return <p className="results-note">These cities sent the same Qloo scoring request. A matching revised affinity is the same measurement. It does not measure local market preferences.</p>;
+  return <p className="results-note">{INTEREST_AFFINITY_NOTE} These cases sent the same Qloo scoring request. A matching revised affinity is the same measurement. It does not measure local market preferences.</p>;
 }
 
 function geographyCopy(item: CaseRecord, domain: "book" | "place"): string {
@@ -196,10 +220,23 @@ function scoreFor(item: CaseRecord, id: string | null): ScoreRow | undefined {
   return item.scores.find((row) => row.entityId.toLowerCase() === id.toLowerCase());
 }
 
+function statusesFor(item: CaseRecord, entityId: string | null, domain: "book" | "place"): string[] {
+  const score = scoreFor(item, entityId);
+  const pick = entityId ? item.extracted.find((entry) => entry.entityId?.toLowerCase() === entityId.toLowerCase()) : undefined;
+  return evidenceStatuses({
+    domain,
+    affinity: score?.affinity ?? null,
+    origin: score?.evidenceOrigin ?? null,
+    explainabilityAvailable: score?.explainability.status === "available",
+    identityProvisional: Boolean(pick && (pick.matchStatus === "provisional" || pick.ambiguous)),
+    priceChecked: priceEditionStockChecked(entityId ? item.checksById[entityId] ?? [] : []),
+  });
+}
+
 function CityDots({ rows }: { rows: Array<{ city: string; original: { value: number | null; numerator: number; denominator: number }; revised: { value: number | null; numerator: number; denominator: number }; changeText: string }> }) {
   const max = Math.max(1, ...rows.flatMap((row) => [row.original.value ?? 0, row.revised.value ?? 0]));
   return (
-    <div className="dot-chart" aria-label="Affinity comparison by city">
+    <div className="dot-chart" aria-label="Affinity comparison">
       {rows.map((row) => (
         <div className="dot-row" key={row.city}>
           <span>{row.city}</span>
@@ -214,7 +251,7 @@ function CityDots({ rows }: { rows: Array<{ city: string; original: { value: num
   );
 }
 
-function CityCompare({ cases, domain, city }: { cases: CaseRecord[]; domain: "book" | "place"; city: string }) {
+function CityCompare({ cases, domain, city, unit }: { cases: CaseRecord[]; domain: "book" | "place"; city: string; unit: "reader" | "city" }) {
   const item = cases.find((entry) => entry.city === city);
   if (!item) return null;
   const diff = diffFor(item);
@@ -223,7 +260,7 @@ function CityCompare({ cases, domain, city }: { cases: CaseRecord[]; domain: "bo
     <section className="ta-panel">
       <div className="ta-panel-head">
         <div>
-          <h2>2. Selected city: {item.city}</h2>
+          <h2>2. Selected {unit}: {item.city}</h2>
           <p>{geographyCopy(item, domain)}</p>
         </div>
       </div>
@@ -256,7 +293,7 @@ function CityCompare({ cases, domain, city }: { cases: CaseRecord[]; domain: "bo
       </section>
       <ol className="short-answer">
         {item.revisedSelections.map((pick, index) => (
-          <li key={pick.id}><strong>{index + 1}. {pick.name}</strong> {pick.reason} Practical facts for this name stay unverified unless a constraint check recorded a pass or fail.</li>
+          <li key={pick.id}><strong>{index + 1}. {pick.name}</strong> {pick.reason} {statusesFor(item, pick.id, domain).filter((status) => status !== QLOO_AFFINITY_RETURNED).join(". ")}</li>
         ))}
       </ol>
       <details>
@@ -319,11 +356,12 @@ function RecommendationCard({ item, name, entityId, badge, detail, openEvidence 
       <div>
         <strong>{name}</strong>
         <p>{category}</p>
-        <p>Affinity {formatAffinity3(score?.affinity ?? null)} <span className="badge">{badge}</span></p>
+        <p>Affinity {shownAffinity(phaseOf(item), score?.affinity ?? null)} <span className="badge">{badge}</span></p>
+        <p>{statusesFor(item, entityId, state.domain).join(" · ")}</p>
         <p>{detail}</p>
         {openEvidence ? <button type="button" className="text-btn" data-testid="evidence-open" onClick={() => setOpen(true)}>Inspect evidence</button> : null}
+        {open && entityId ? <EvidenceDialog item={item} entityId={entityId} onClose={() => setOpen(false)} /> : null}
       </div>
-      {open && entityId ? <EvidenceDialog item={item} entityId={entityId} onClose={() => setOpen(false)} /> : null}
     </article>
   );
 }
@@ -336,11 +374,11 @@ function EvidenceDialog({ item, entityId, onClose }: { item: CaseRecord; entityI
     <div className="evidence-dialog" role="dialog" aria-label="Evidence">
       {state.source === "imported" ? <p>Imported evidence</p> : null}
       <h3>{score?.name ?? entityId}</h3>
-      <p>Identity {item.extracted.find((pick) => pick.entityId === entityId)?.matchStatus ?? "selected"}. {item.extracted.find((pick) => pick.entityId === entityId)?.ambiguous ? "The match was ambiguous and was not treated as confirmed." : "Ambiguous matches stay labeled."}</p>
-      <p>Affinity {formatAffinity3(score?.affinity ?? null)}. Explainability {score?.explainability.status ?? "unavailable"}.</p>
-      <ul>{score?.explainability.contributions.map((part, index) => <li key={`${part.entityId}-${index}`}>{part.name ?? part.entityId ?? "signal"} {part.value}</li>)}</ul>
+      <p>Entity id {score?.entityId ?? entityId}.</p>
+      <ul>{statusesFor(item, entityId, state.domain).map((status) => <li key={status}>{status}</li>)}</ul>
+      <p>Affinity {shownAffinity(phaseOf(item), score?.affinity ?? null)}.</p>
+      <ul>{score?.explainability.status === "available" ? score.explainability.contributions.map((part, index) => <li key={`${part.entityId}-${index}`}>{part.name ?? part.entityId ?? "signal"} {part.value}</li>) : null}</ul>
       <ul>{checks.map((check) => <li key={check.label}>{check.label}: {check.verdict}. {check.reason}</li>)}</ul>
-      <p>Hours, price, stock, and accessibility stay unverified unless a check above says otherwise.</p>
       <button type="button" className="btn" onClick={onClose}>Close</button>
     </div>
   );
