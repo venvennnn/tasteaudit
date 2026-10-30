@@ -73,7 +73,8 @@ test.describe("acceptance", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /Does it know the customer/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /understand your next customer/ })).toBeVisible();
+    await expect(page.locator(".traveler").first()).toBeVisible();
     await page.getByTestId("cta-demo").click();
     await page.getByTestId("preset-concierge").click();
     await page.getByTestId("favorite-name-0").fill("Spirited Away");

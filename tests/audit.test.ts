@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { ageToSupportedBand } from "@/lib/audit/age";
 import { configurationHash } from "@/lib/audit/hash";
 import { chooseMatch } from "@/lib/audit/match";
-import { buildCaseMetrics, meanObserved } from "@/lib/audit/metrics";
+import { affinityDelta, buildCaseMetrics, formatSigned, meanObserved } from "@/lib/audit/metrics";
 import { dedupeCandidates } from "@/lib/audit/pool";
 import { validateQuotes } from "@/lib/audit/quotes";
 import { validateRepairSelections } from "@/lib/audit/repair";
@@ -73,6 +73,14 @@ describe("evidence and metrics", () => {
     const mean = meanObserved([0.5, null]);
     expect(mean.value).toBe(0.5);
     expect(mean).toMatchObject({ numerator: 1, denominator: 2 });
+  });
+
+  it("reports the mean affinity change from the plain list to the Qloo revision", () => {
+    expect(affinityDelta(0.31, 0.48)).toBeCloseTo(0.17);
+    expect(formatSigned(affinityDelta(0.31, 0.48))).toBe("+0.1700");
+    expect(formatSigned(affinityDelta(0.48, 0.31))).toBe("-0.1700");
+    expect(affinityDelta(0.42, null)).toBeNull();
+    expect(formatSigned(0)).toBe("0.0000");
   });
 
   it("dedupes the shared pool and keeps original picks ahead of discovery overflow", () => {

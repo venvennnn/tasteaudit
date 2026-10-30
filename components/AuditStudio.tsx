@@ -3,6 +3,8 @@
 import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { SiteHeader } from "@/components/SiteHeader";
+import { ModeSwitch } from "@/components/ModeSwitch";
+import { Journey } from "@/components/Journey";
 import { useSession } from "@/components/SessionProvider";
 import { estimateProviderCalls } from "@/lib/audit/estimate";
 import { buildTask } from "@/lib/audit/orchestrate";
@@ -10,6 +12,18 @@ import { FROZEN_GENERATION, LIMITS, SYSTEM_PROMPT_VERSION } from "@/lib/schemas/
 import { activeCities, type Favorite } from "@/lib/session/state";
 
 const STEPS = ["Company", "Customer", "Task", "Review"] as const;
+const TITLES = [
+  "Whose AI are we testing?",
+  "What makes your customer, them?",
+  "What should the assistant answer?",
+  "Review the request",
+];
+const SUBS = [
+  "Start with your company, or try a familiar assistant first.",
+  "Give every approach the same interests, context and constraints.",
+  "This question is sent to every approach unchanged.",
+  "The server freezes the model settings before the first call.",
+];
 
 export function AuditStudio() {
   const { state, update, run } = useSession();
@@ -49,33 +63,73 @@ export function AuditStudio() {
   return (
     <div className="workspace">
       <SiteHeader tone="workspace" />
-      <div className="page-intro">
-        <h1>Audit your company</h1>
-        <p>Four short steps. Entering a company name does not connect its proprietary assistant.</p>
-        <p className="memory" data-testid="session-memory-note">The audit stays in this tab’s memory. Download the result before you refresh. Provider requests leave this browser.</p>
+      <div className="studio">
+        <div className="studio-main">
+          <p className="eyebrow">{String(step + 1).padStart(2, "0")} / {STEPS[step]}</p>
+          <h1>{TITLES[step]}</h1>
+          <p className="lede">{SUBS[step]}</p>
+          <ModeSwitch current="audit" />
+          <p className="memory" data-testid="session-memory-note">The audit stays in this tab’s memory. Download the result before you refresh. Provider requests leave this browser.</p>
+          <section className="card">
+            <div className="steps" aria-label="Audit steps">
+              {STEPS.map((label, index) => <span key={label} data-current={index === step}>{label}</span>)}
+            </div>
+            {step === 0 ? <CompanyStep /> : null}
+            {step === 1 ? <CustomerStep /> : null}
+            {step === 2 ? <TaskStep /> : null}
+            {step === 3 ? <ReviewStep estimate={estimate.total} lines={estimate.lines} /> : null}
+            {error ? <p className="error" role="alert">{error}</p> : null}
+            <div className="row-actions end">
+              {step > 0 ? <button type="button" className="btn ghost" onClick={() => setStep((value) => value - 1)}>Back</button> : null}
+              {step < 3 ? <button type="button" className="btn cyan" data-testid="step-next" onClick={next}>Continue</button> : (
+                <button type="button" className="btn cyan" data-testid="audit-start" onClick={() => {
+                  const task = buildTask(state, cities[0] ?? "", []);
+                  if ("error" in task) { setError(task.error); return; }
+                  void run([cities[0]]);
+                  router.push("/results");
+                }}>Review & run</button>
+              )}
+            </div>
+          </section>
+        </div>
+        <aside className="card rail">
+          {step === 1 ? <CustomerRail /> : <HowRail />}
+        </aside>
       </div>
-      <section className="card">
-        <div className="steps" aria-label="Audit steps">
-          {STEPS.map((label, index) => <span key={label} data-current={index === step}>{label}</span>)}
-        </div>
-        {step === 0 ? <CompanyStep /> : null}
-        {step === 1 ? <CustomerStep /> : null}
-        {step === 2 ? <TaskStep /> : null}
-        {step === 3 ? <ReviewStep estimate={estimate.total} lines={estimate.lines} /> : null}
-        {error ? <p className="error" role="alert">{error}</p> : null}
-        <div className="row-actions">
-          {step > 0 ? <button type="button" className="btn ghost" onClick={() => setStep((value) => value - 1)}>Back</button> : null}
-          {step < 3 ? <button type="button" className="btn cyan" data-testid="step-next" onClick={next}>Continue</button> : (
-            <button type="button" className="btn cyan" data-testid="audit-start" onClick={() => {
-              const task = buildTask(state, cities[0] ?? "", []);
-              if ("error" in task) { setError(task.error); return; }
-              void run([cities[0]]);
-              router.push("/results");
-            }}>Start audit</button>
-          )}
-        </div>
-      </section>
+      <Journey active={step + 1} />
     </div>
+  );
+}
+
+function HowRail() {
+  return (
+    <>
+      <h2>How your audit works</h2>
+      <ol className="how-list">
+        <li><span>1</span><div><strong>Choose an assistant</strong><p>Test a familiar assistant or describe your company. A company name does not connect its model.</p></div></li>
+        <li><span>2</span><div><strong>Add a customer</strong><p>Bring a real customer question or use one of ours.</p></div></li>
+        <li><span>3</span><div><strong>Compare the evidence</strong><p>See how mean affinity moves from the plain model to the Qloo revision.</p></div></li>
+      </ol>
+    </>
+  );
+}
+
+function CustomerRail() {
+  const { state } = useSession();
+  const interests = state.profile.favorites.filter((favorite) => favorite.name.trim());
+  return (
+    <>
+      <h2>Your customer</h2>
+      <div className="mini-sky" aria-hidden="true">
+        <span style={{ left: "24%", top: "38%" }} />
+        <span style={{ left: "50%", top: "30%", background: "#ff4f9a" }} />
+        <span style={{ left: "68%", top: "52%" }} />
+      </div>
+      <p className="rail-name">{state.profile.label || "Customer"}</p>
+      <p className="muted">{state.cities[0] || "City not set"}</p>
+      <ul className="rail-tags">{interests.map((favorite) => <li key={`${favorite.kind}-${favorite.name}`}>{favorite.name}</li>)}</ul>
+      <p className="muted">Same context for every approach. Gemini receives this customer brief.</p>
+    </>
   );
 }
 
@@ -115,33 +169,45 @@ function CustomerStep() {
     update({ profile: { ...state.profile, favorites: state.profile.favorites.map((favorite, item) => item === index ? { ...favorite, ...patch } : favorite) } });
   }
   return (
-    <div className="form-grid two">
-      <label>Age, if the customer stated it
-        <input aria-label="Age" value={state.profile.age} onChange={(event) => update({ profile: { ...state.profile, age: event.target.value } })} />
-      </label>
-      <label>City
-        <input data-testid="city-input" value={state.cities[0] ?? ""} onChange={(event) => update({ cities: [event.target.value] })} />
-      </label>
-      <label>Country
-        <input aria-label="Country" value={state.profile.country} onChange={(event) => update({ profile: { ...state.profile, country: event.target.value } })} />
-      </label>
-      <label>Budget
-        <input aria-label="Budget" value={state.profile.budget} onChange={(event) => update({ profile: { ...state.profile, budget: event.target.value } })} />
-      </label>
-      <label>Currency
-        <input aria-label="Currency" value={state.profile.currency} onChange={(event) => update({ profile: { ...state.profile, currency: event.target.value } })} />
-      </label>
-      <label>Language
-        <input aria-label="Language" value={state.profile.language} onChange={(event) => update({ profile: { ...state.profile, language: event.target.value } })} />
-      </label>
-      <label>Requirements
-        <textarea aria-label="Requirements" value={state.profile.requirements} onChange={(event) => update({ profile: { ...state.profile, requirements: event.target.value } })} />
-      </label>
-      {state.profile.favorites.map((favorite, index) => (
-        <label key={index}>Interest {index + 1}
-          <input data-testid={`favorite-name-${index}`} value={favorite.name} onChange={(event) => edit(index, { name: event.target.value })} />
+    <div className="stack">
+      <p className="section-label">What are they into?</p>
+      <div className="interest-list">
+        {state.profile.favorites.map((favorite, index) => (
+          <div className="interest-chip" key={index}>
+            <select className="chip-kind" aria-label={`Kind ${index + 1}`} value={favorite.kind} onChange={(event) => edit(index, { kind: event.target.value as Favorite["kind"] })}>
+              <option value="movie">Movie</option>
+              <option value="artist">Artist</option>
+              <option value="book">Book</option>
+              <option value="any">Any</option>
+            </select>
+            <input data-testid={`favorite-name-${index}`} aria-label={`Interest ${index + 1}`} placeholder="Search a movie, artist or book..." value={favorite.name} onChange={(event) => edit(index, { name: event.target.value })} />
+          </div>
+        ))}
+      </div>
+      <p className="section-label">A little context</p>
+      <div className="context-grid">
+        <label>City
+          <input data-testid="city-input" value={state.cities[0] ?? ""} onChange={(event) => update({ cities: [event.target.value] })} />
         </label>
-      ))}
+        <label>Age, optional
+          <input aria-label="Age" value={state.profile.age} onChange={(event) => update({ profile: { ...state.profile, age: event.target.value } })} />
+        </label>
+        <label>Country
+          <input aria-label="Country" value={state.profile.country} onChange={(event) => update({ profile: { ...state.profile, country: event.target.value } })} />
+        </label>
+        <label>Budget
+          <input aria-label="Budget" value={state.profile.budget} onChange={(event) => update({ profile: { ...state.profile, budget: event.target.value } })} />
+        </label>
+        <label>Currency
+          <input aria-label="Currency" value={state.profile.currency} onChange={(event) => update({ profile: { ...state.profile, currency: event.target.value } })} />
+        </label>
+        <label>Language
+          <input aria-label="Language" value={state.profile.language} onChange={(event) => update({ profile: { ...state.profile, language: event.target.value } })} />
+        </label>
+      </div>
+      <label>Practical needs, optional
+        <textarea aria-label="Requirements" placeholder="Dietary needs, accessibility, travel distance..." value={state.profile.requirements} onChange={(event) => update({ profile: { ...state.profile, requirements: event.target.value } })} />
+      </label>
       <p className="muted">Names are not used to infer ethnicity, age, or taste. Only the interests you type, plus a documented age band when you enter an age, can be sent to Qloo. The city is a Qloo place filter. For books it is sent only to Gemini.</p>
     </div>
   );

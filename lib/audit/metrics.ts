@@ -78,3 +78,16 @@ export function formatAffinity(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "No score";
   return value.toFixed(4);
 }
+
+export function affinityDelta(original: number | null, revised: number | null): number | null {
+  if (typeof original !== "number" || typeof revised !== "number") return null;
+  if (!Number.isFinite(original) || !Number.isFinite(revised)) return null;
+  return revised - original;
+}
+
+export function formatSigned(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "No score";
+  if (Math.abs(value) < 0.00005) return "0.0000";
+  const text = Math.abs(value).toFixed(4);
+  return value > 0 ? `+${text}` : `-${text}`;
+}
