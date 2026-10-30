@@ -24,9 +24,9 @@ Fill the server variables in `.env.local`. None of them use a `NEXT_PUBLIC_` pre
 | Variable | Purpose |
 | --- | --- |
 | `QLOO_API_KEY` | Sent only as the `X-Api-Key` header |
-| `QLOO_BASE_URL` | Host origin for the key you were issued, with no path. Hackathon keys use `https://hackathon.api.qloo.com` and do not work on `https://api.qloo.com`. The app does not switch hosts. |
+| `QLOO_BASE_URL` | Optional host origin, with no path. Unset uses `https://hackathon.api.qloo.com`. Production keys must set `https://api.qloo.com`. The app does not switch hosts during a call. |
 | `GEMINI_API_KEY` | Google Gemini API key |
-| `GEMINI_MODEL` | A model this key can call that supports structured JSON output. `gemini-2.5-flash` is a documented structured-output model. The server uses this value for every arm and does not substitute another model. |
+| `GEMINI_MODEL` | Optional. Unset uses `gemini-2.5-flash`, a documented structured-output model. The server uses one model for every arm and does not substitute another. |
 | `EVIDENCE_SIGNING_SECRET` | Optional. At least 16 characters. Scoring then returns a short-lived HMAC envelope, and the revision includes numeric affinity only when that envelope verifies. |
 | `TASTEAUDIT_MAX_CITIES` | Optional cap, at most 3 |
 | `TASTEAUDIT_INSTANCE_RPM` | Optional per-isolate request cap. This resets with the process and is not a durable global rate limit. |

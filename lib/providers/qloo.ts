@@ -41,17 +41,10 @@ export type QlooCall = {
   retrievedAt: string;
 };
 
+const HACKATHON_ORIGIN = "https://hackathon.api.qloo.com";
+
 function configuredBase(): URL {
-  const raw = process.env.QLOO_BASE_URL?.trim();
-  if (!raw) {
-    throw new AppError({
-      code: "not_configured",
-      message: "QLOO_BASE_URL is not configured.",
-      stage: "qloo",
-      retryable: false,
-      status: 503,
-    });
-  }
+  const raw = process.env.QLOO_BASE_URL?.trim() || HACKATHON_ORIGIN;
   let url: URL;
   try {
     url = new URL(raw);
@@ -90,7 +83,7 @@ function apiKey(): string {
   if (!key) {
     throw new AppError({
       code: "not_configured",
-      message: "QLOO_API_KEY is not configured.",
+      message: "QLOO_API_KEY is not configured. Add it on the server and restart. Hackathon keys use https://hackathon.api.qloo.com unless QLOO_BASE_URL is set.",
       stage: "qloo",
       retryable: false,
       status: 503,

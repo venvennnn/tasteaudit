@@ -67,17 +67,7 @@ export const repairJsonSchema = {
 };
 
 function requiredModel(): string {
-  const model = process.env.GEMINI_MODEL?.trim();
-  if (!model) {
-    throw new AppError({
-      code: "not_configured",
-      message: "GEMINI_MODEL is not configured.",
-      stage: "gemini",
-      retryable: false,
-      status: 503,
-    });
-  }
-  return model;
+  return process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
 }
 
 function requiredKey(): string {
