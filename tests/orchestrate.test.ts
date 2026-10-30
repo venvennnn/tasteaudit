@@ -167,6 +167,81 @@ describe("orchestration", () => {
     expect(state.cases.Osaka?.phase).toBe("queued");
     expect(state.cases.Osaka?.originalAnswer).toBeNull();
   });
+
+  it("preserves identical book scores when every city sends the same interest-only request", async () => {
+    const garden = "dddddddd-dddd-dddd-dddd-dddddddddddd";
+    let state = reducer(readyState(), { type: "update", patch: { domain: "book", recommendationCount: 1, cities: ["Chicago", "London"] } });
+    const discoverBodies: unknown[] = [];
+    const scoreBodies: unknown[] = [];
+    const post = async <T,>(path: string, body: unknown): Promise<{ data: T; warnings: string[]; provenance: Record<string, unknown> }> => {
+      if (path.endsWith("/discover")) discoverBodies.push(body);
+      if (path.endsWith("/score")) scoreBodies.push(body);
+      if (path.endsWith("/search")) {
+        return { data: { candidates: [{ entityId: seed, name: "Dune", types: ["urn:entity:book"] }], match: { status: "exact", ambiguous: false, entity: { entityId: seed, name: "Dune", types: ["urn:entity:book"] } } } as T, warnings: [], provenance: {} };
+      }
+      if (path.endsWith("/original")) {
+        return { data: { answer: "Read Dune." } as T, warnings: [], provenance: { requestedModel: "gemini-test" } };
+      }
+      if (path.endsWith("/extract")) {
+        return { data: { picks: [{ name: "Dune", quote: "Dune" }] } as T, warnings: [], provenance: {} };
+      }
+      if (path.endsWith("/discover")) {
+        return { data: { entities: [{ entityId: garden, name: "Quiet Book", types: ["urn:entity:book"] }], geographicSignalApplied: false, locality: null } as T, warnings: [], provenance: {} };
+      }
+      if (path.endsWith("/score")) {
+        return { data: { entities: [
+          { entityId: seed, name: "Dune", types: ["urn:entity:book"], affinity: 0.2, explainability: { status: "unavailable", contributions: [], warning: null, raw: null }, language: null, description: null, tags: [], envelope: null, evidenceOrigin: "unsigned" },
+          { entityId: garden, name: "Quiet Book", types: ["urn:entity:book"], affinity: 0.881, explainability: { status: "unavailable", contributions: [], warning: null, raw: null }, language: null, description: null, tags: [], envelope: null, evidenceOrigin: "unsigned" },
+        ], missingIds: [], geographicSignalApplied: false, locality: null, signing: false } as T, warnings: [], provenance: {} };
+      }
+      return { data: { selections: [{ id: seed, reason: "Keep Dune." }], answer: "Revised around Dune." } as T, warnings: [], provenance: { requestedModel: "gemini-test" } };
+    };
+    await executeRun({
+      state,
+      cities: ["Chicago", "London"],
+      signal: new AbortController().signal,
+      post,
+      onSeeds: (seeds, stage) => { state = reducer(state, { type: "seeds", seeds, stage }); },
+      onCase: (city, patch) => { state = reducer(state, { type: "patch-case", city, patch }); },
+    });
+    expect(discoverBodies).toHaveLength(1);
+    expect(discoverBodies.every((body) => !("locationQuery" in (body as object)))).toBe(true);
+    expect(scoreBodies).toHaveLength(2);
+    expect(scoreBodies.every((body) => (body as { locationQuery?: string }).locationQuery === undefined)).toBe(true);
+    expect(state.cases.Chicago?.discovered).not.toBe(state.cases.London?.discovered);
+    expect(state.cases.Chicago?.diagnostic?.requestKey).toBe(state.cases.London?.diagnostic?.requestKey);
+    expect(state.cases.Chicago?.diagnostic?.selectedIds).toEqual([garden]);
+    expect(state.cases.London?.diagnostic?.selectedIds).toEqual([garden]);
+    expect(state.cases.Chicago?.diagnostic?.unroundedRevisedMean).toBe(0.881);
+    expect(state.cases.London?.diagnostic?.unroundedRevisedMean).toBe(0.881);
+    expect(state.cases.Chicago?.diagnostic?.revisedAffinities).toEqual([{ entityId: garden, affinity: 0.881 }]);
+    expect(state.cases.Chicago?.diagnostic?.geographyNote).toBe("Affinity reflects explicit interests. Location was not applied to Qloo scoring.");
+    expect(state.cases.Chicago?.diagnostic?.scoreParameters?.some((row) => row.name === "filter.location.query")).toBe(false);
+    expect(state.cases.Chicago?.diagnostic?.locationAccounting?.scoringSignal).toMatch(/No geographic scoring signal/);
+  });
+
+  it("records a different locality filter for each place without treating it as a scoring signal", async () => {
+    let state = readyState();
+    const scored: string[] = [];
+    const post = async <T,>(path: string, body: unknown): Promise<{ data: T; warnings: string[]; provenance: Record<string, unknown> }> => {
+      if (path.endsWith("/score")) scored.push((body as { locationQuery?: string }).locationQuery ?? "");
+      return sharedOk<T>(path);
+    };
+    await executeRun({
+      state,
+      cities: ["Lisbon", "Osaka"],
+      signal: new AbortController().signal,
+      post,
+      onSeeds: (seeds, stage) => { state = reducer(state, { type: "seeds", seeds, stage }); },
+      onCase: (city, patch) => { state = reducer(state, { type: "patch-case", city, patch }); },
+    });
+    expect(scored.sort()).toEqual(["Lisbon", "Osaka"]);
+    expect(state.cases.Lisbon?.diagnostic?.requestKey).not.toBe(state.cases.Osaka?.diagnostic?.requestKey);
+    expect(state.cases.Lisbon?.diagnostic?.scoreParameters?.find((row) => row.name === "filter.location.query")?.value).toBe("Lisbon");
+    expect(state.cases.Osaka?.diagnostic?.scoreParameters?.find((row) => row.name === "filter.location.query")?.value).toBe("Osaka");
+    expect(state.cases.Lisbon?.diagnostic?.locationAccounting?.scoringSignal).toMatch(/No geographic scoring signal/);
+    expect(state.cases.Lisbon?.scores).not.toBe(state.cases.Osaka?.scores);
+  });
 });
 
 function sharedOk<T>(path: string): { data: T; warnings: string[]; provenance: Record<string, unknown> } {

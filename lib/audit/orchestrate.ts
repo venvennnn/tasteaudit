@@ -1,6 +1,7 @@
 import { ageBandLabel, ageToSupportedBand } from "@/lib/audit/age";
 import { verifyConstraints } from "@/lib/audit/constraints";
 import { geographyNote } from "@/lib/audit/geography";
+import { insightsParameters } from "@/lib/providers/qloo";
 import { configurationHash } from "@/lib/audit/hash";
 import { buildCaseMetrics, meanObserved } from "@/lib/audit/metrics";
 import { dedupeCandidates } from "@/lib/audit/pool";
@@ -156,10 +157,14 @@ function signalSnapshot(input: {
   const withheld: { name: string; reason: string }[] = [];
   if (input.domain === "place") {
     qloo.push({ name: "filter.location.query", value: input.city });
+    withheld.push({
+      name: "Location scoring signal",
+      reason: "filter.location.query is a locality candidate filter. The parameter dictionary lists it for Place. The place entity-type table lists filter.location and does not list signal.location.query. signal.location.query was not sent, so affinity is not a local-market score.",
+    });
   } else {
     withheld.push({
-      name: "City",
-      reason: "For books, the city is sent only to Gemini. Qloo scores are not city-conditioned unless a supported geographic taste signal is applied. None was applied.",
+      name: "Location scoring signal",
+      reason: "Affinity reflects explicit interests. Location was not applied to Qloo scoring. The book entity-type guide does not list a location filter or signal.location.query. The parameter dictionary lists signal.location.query for Book and does not list filter.location.query for Book. Neither was sent.",
     });
   }
   if (input.ageBand) {
@@ -188,8 +193,10 @@ function signalSnapshot(input: {
   };
 }
 
-function fingerprint(ids: string[]): string {
-  return configurationHash([...ids].sort());
+function parameterRows(parameters: Record<string, string>): { name: string; value: string }[] {
+  return Object.entries(parameters)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([name, value]) => ({ name, value }));
 }
 
 async function resolveName(
@@ -275,6 +282,8 @@ export async function executeRun(options: {
   const seedIds = seeds.map((seed) => seed.entityId).filter((id): id is string => Boolean(id));
   const age = parseAge(state.profile.age);
   const ageBand = ageToSupportedBand(age);
+  // Books have no supported location parameter, so every city would send the same discovery request.
+  // One request is reused, then copied into each city. It is not a location cache.
   let bookDiscovery: Promise<ApiOk<DiscoverData>> | null = null;
 
   await pooled(cities, 2, async (city) => {
@@ -407,7 +416,7 @@ export async function executeRun(options: {
           data = response.data;
           warnings.push(...response.warnings);
         }
-        discovered = data.entities;
+        discovered = data.entities.map((entity) => ({ ...entity, types: [...entity.types] }));
         signals = signalSnapshot({
           domain: state.domain,
           city,
@@ -450,7 +459,22 @@ export async function executeRun(options: {
       );
       if (pool.truncated) warnings.push("The shared pool was capped so it could be scored in one request. Dropped names were extra discoveries, not the original picks.");
       const ids = pool.pool.map((item) => item.entityId);
-      const nextFingerprint = fingerprint(ids);
+      const discoverSpec = insightsParameters({
+        domain: state.domain,
+        seedIds,
+        locationQuery: state.domain === "place" ? city : undefined,
+        ageBand: ageBand ?? undefined,
+        take: LIMITS.discoverTake,
+      });
+      const scoreSpec = insightsParameters({
+        domain: state.domain,
+        seedIds,
+        candidateIds: ids,
+        locationQuery: state.domain === "place" ? city : undefined,
+        ageBand: ageBand ?? undefined,
+        take: Math.min(50, ids.length),
+      });
+      const nextFingerprint = configurationHash(scoreSpec.parameters);
       let scores = existing.scores;
       if (ids.length === 0) {
         warnings.push("There were no resolved entities to score.");
@@ -543,6 +567,13 @@ export async function executeRun(options: {
         }),
       });
       const discoveredIds = discovered.map((item) => item.entityId);
+      const selectedAffinities = selection.selected.map((item) => ({
+        entityId: item.entityId,
+        affinity: scoreById.get(item.entityId.toLowerCase())?.affinity ?? null,
+      }));
+      const originalMeanNow = meanObserved(originalIds.map((id) => scoreById.get(id.toLowerCase())?.affinity ?? null));
+      const revisedMeanNow = meanObserved(selectedAffinities.map((item) => item.affinity));
+      const locationFilterApplied = Boolean(signals?.geographicSignalApplied) || scoreSpec.locationFilterApplied;
       const diagnostic = {
         originalIds,
         discoveredIds,
@@ -553,9 +584,22 @@ export async function executeRun(options: {
         replacementCount: selection.diff.replacementCount,
         scoringSignals: (signals?.qloo ?? []).map((item) => ({ ...item })),
         exclusions: selection.exclusions,
-        geographyNote: geographyNote(state.domain, Boolean(signals?.geographicSignalApplied)),
+        geographyNote: geographyNote(state.domain, locationFilterApplied),
         summary: selection.diff.summary,
         diff: selection.diff,
+        revisedAffinities: selectedAffinities,
+        unroundedOriginalMean: originalMeanNow.value,
+        unroundedRevisedMean: revisedMeanNow.value,
+        requestKey: configurationHash(scoreSpec.parameters),
+        discoverParameters: parameterRows(discoverSpec.parameters),
+        scoreParameters: parameterRows(scoreSpec.parameters),
+        locationAccounting: {
+          gemini: `The city ${city} is included in the Gemini brief.`,
+          candidateFilter: scoreSpec.locationFilterApplied
+            ? `filter.location.query=${city} on discovery and scoring.`
+            : "No locality filter was sent to Qloo.",
+          scoringSignal: "No geographic scoring signal was sent.",
+        },
       };
       let revisedSelections = selection.selected.map((item) => ({
         id: item.entityId,

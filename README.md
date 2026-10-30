@@ -79,7 +79,7 @@ Qloo calls from the server:
 
 - `GET /search` with `query`, `types`, `page`, `take`, and `sort_by=match`
 - `GET /v2/insights` with `filter.type`, `signal.interests.entities`, `feature.explainability=true`, and `take`
-- Places may add `filter.location.query`. Books do not. The interface says so when a city was not sent to Qloo.
+- Places may add `filter.location.query`, documented for Place as a locality candidate filter. Books do not. `signal.location` and `signal.location.query` appear in the parameter dictionary for both types and are absent from the book and place entity-type tables, so they are not sent. Affinity stays interest-based.
 - Scoring adds `filter.results.entities` for the shared pool and reads `query.affinity`. It does not copy the discovery list in place of a missing score.
 - An explicit age is mapped only onto a documented band (`24_and_younger`, `25_to_29`, `30_to_34`, `35_to_44`, `45_to_54`, `55_and_older`) and the mapping is shown. Gender and audience ids are not sent.
 - `GET /entities` is available for metadata. Metadata does not prove hours, stock, price, or accessibility.
