@@ -3,17 +3,29 @@
 import { useMemo, useState } from "react";
 import { useSession } from "@/components/SessionProvider";
 import { SiteHeader } from "@/components/SiteHeader";
+import { ModeSwitch } from "@/components/ModeSwitch";
+import { Journey } from "@/components/Journey";
+import { BellIcon, BookIcon } from "@/components/icons";
 import { estimateProviderCalls } from "@/lib/audit/estimate";
 import { buildTask } from "@/lib/audit/orchestrate";
 import { DEMO_PRESETS, type DemoPresetId } from "@/lib/session/presets";
 import { activeCities, resultsReady, type Favorite } from "@/lib/session/state";
 import { ResultsBody } from "@/components/ResultsStudio";
 
+const KIND_TABS: Array<{ id: Favorite["kind"] | "all"; label: string }> = [
+  { id: "all", label: "All" },
+  { id: "movie", label: "Movies & TV" },
+  { id: "artist", label: "Music" },
+  { id: "book", label: "Books" },
+  { id: "any", label: "Any" },
+];
+
 export function DemoStudio() {
   const { state, update, run } = useSession();
   const [preset, setPreset] = useState<DemoPresetId | null>(state.scenario === "demo" ? (state.domain === "book" ? "bookseller" : "concierge") : null);
   const [extraCity, setExtraCity] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
+  const [kindTab, setKindTab] = useState<Favorite["kind"] | "all">("all");
   const cities = activeCities(state);
   const taskPreview = useMemo(() => buildTask(state, cities[0] ?? "", state.seeds), [state, cities]);
   const estimate = estimateProviderCalls({
@@ -47,40 +59,72 @@ export function DemoStudio() {
     await run([city]);
   }
 
+  const active = resultsReady(state) ? 4 : state.running ? 3 : preset ? 2 : 1;
+
   return (
     <div className="workspace">
       <SiteHeader tone="workspace" />
-      <div className="page-intro">
-        <h1>Guided demo</h1>
-        <p>Choose a simulated assistant, edit the persona, and read the exact request before it runs. These presets are inputs, not finished audits.</p>
-        <p className="memory" data-testid="session-memory-note">
-          This run lives in browser memory only. Refreshing or closing the tab clears it. Inputs are sent to the configured Qloo and Gemini providers. TasteAudit does not promise that those providers retain nothing.
-        </p>
-      </div>
-      <div className="layout">
-        <div className="stack">
-          <section className="card">
-            <h2>Simulated assistant</h2>
-            <div className="choice-grid">
-              <button type="button" className="choice" aria-pressed={preset === "concierge"} data-testid="preset-concierge" onClick={() => applyPreset("concierge")}>
-                <strong>Simulated concierge</strong>
-                <small>A Marriott-style hotel concierge. Not affiliated with Marriott.</small>
-              </button>
-              <button type="button" className="choice" aria-pressed={preset === "bookseller"} data-testid="preset-bookseller" onClick={() => applyPreset("bookseller")}>
-                <strong>Simulated bookseller</strong>
-                <small>A Barnes & Noble-style bookseller. Not affiliated with Barnes & Noble.</small>
-              </button>
+      <div className="studio">
+        <div className="studio-main">
+          <p className="eyebrow">01 / Simulated assistant</p>
+          <h1>Whose AI are we testing?</h1>
+          <p className="lede">Start with a familiar assistant or build your own scenario.</p>
+          <ModeSwitch current="demo" />
+          <p className="memory" data-testid="session-memory-note">
+            This run lives in browser memory only. Refreshing or closing the tab clears it. Inputs are sent to the configured Qloo and Gemini providers. TasteAudit does not promise that those providers retain nothing.
+          </p>
+          <div className="choice-grid assistant-grid">
+            <button type="button" className="choice" aria-pressed={preset === "concierge"} data-testid="preset-concierge" onClick={() => applyPreset("concierge")}>
+              <span className="pin" aria-hidden="true" />
+              <BellIcon />
+              <strong>The concierge</strong>
+              <small>Marriott-style assistant</small>
+              <p>Recommend places for a customer’s evening out.</p>
+            </button>
+            <button type="button" className="choice" aria-pressed={preset === "bookseller"} data-testid="preset-bookseller" onClick={() => applyPreset("bookseller")}>
+              <span className="pin" aria-hidden="true" />
+              <BookIcon />
+              <strong>The bookseller</strong>
+              <small>Barnes & Noble-style assistant</small>
+              <p>Discover books through the customer’s cultural interests.</p>
+            </button>
+          </div>
+          <p className="muted">Simulated assistants · No brand affiliation</p>
+          {state.disclaimer ? <p>{state.disclaimer}</p> : null}
+
+          <section className="card" style={{ marginTop: 16 }}>
+            <h2>What makes your customer, them?</h2>
+            <p className="lede">Give every approach the same interests, context and constraints.</p>
+            <p className="section-label">What are they into?</p>
+            <div className="kind-tabs" role="group" aria-label="Interest kinds">
+              {KIND_TABS.map((tab) => (
+                <button key={tab.id} type="button" aria-pressed={kindTab === tab.id} onClick={() => setKindTab(tab.id)}>{tab.label}</button>
+              ))}
             </div>
-            {state.disclaimer ? <p>{state.disclaimer}</p> : null}
-          </section>
-          <section className="card">
-            <h2>Persona</h2>
-            <div className="form-grid two">
-              <label>Age
-                <input aria-label="Age" value={state.profile.age} onChange={(event) => update({ profile: { ...state.profile, age: event.target.value } })} />
+            <div className="interest-list">
+              {state.profile.favorites.map((favorite, index) => (
+                <div className="interest-chip" key={index} data-dim={kindTab !== "all" && favorite.kind !== kindTab ? "true" : "false"}>
+                  <select className="chip-kind" aria-label={`Kind ${index + 1}`} value={favorite.kind} onChange={(event) => editFavorite(index, { kind: event.target.value as Favorite["kind"] })}>
+                    <option value="movie">Movie</option>
+                    <option value="artist">Artist</option>
+                    <option value="book">Book</option>
+                    <option value="any">Any</option>
+                  </select>
+                  <input data-testid={`favorite-name-${index}`} aria-label={`Favorite ${index + 1}`} placeholder="Search a movie, artist or book..." value={favorite.name} onChange={(event) => editFavorite(index, { name: event.target.value })} />
+                  <button type="button" className="chip-x" aria-label={`Clear interest ${index + 1}`} onClick={() => editFavorite(index, { name: "" })}>×</button>
+                </div>
+              ))}
+            </div>
+            <p className="section-label">A little context</p>
+            <div className="context-grid">
+              <label>Name
+                <input aria-label="Customer name" value={state.profile.label} onChange={(event) => update({ profile: { ...state.profile, label: event.target.value } })} />
               </label>
               <label>City
                 <input aria-label="City" data-testid="city-input" value={state.cities[0] ?? ""} onChange={(event) => update({ cities: [event.target.value, ...state.cities.slice(1)] })} />
+              </label>
+              <label>Age, optional
+                <input aria-label="Age" value={state.profile.age} onChange={(event) => update({ profile: { ...state.profile, age: event.target.value } })} />
               </label>
               <label>Budget
                 <input aria-label="Budget" value={state.profile.budget} onChange={(event) => update({ profile: { ...state.profile, budget: event.target.value } })} />
@@ -91,39 +135,19 @@ export function DemoStudio() {
               <label>Language
                 <input aria-label="Language" value={state.profile.language} onChange={(event) => update({ profile: { ...state.profile, language: event.target.value } })} />
               </label>
-              <label>Requirements
-                <input aria-label="Requirements" value={state.profile.requirements} onChange={(event) => update({ profile: { ...state.profile, requirements: event.target.value } })} />
-              </label>
             </div>
-            <div className="stack" style={{ marginTop: 12 }}>
-              {state.profile.favorites.map((favorite, index) => (
-                <div className="form-grid two" key={index}>
-                  <label>Favorite {index + 1}
-                    <input data-testid={`favorite-name-${index}`} value={favorite.name} onChange={(event) => editFavorite(index, { name: event.target.value })} />
-                  </label>
-                  <label>Kind
-                    <select aria-label={`Kind ${index + 1}`} value={favorite.kind} onChange={(event) => editFavorite(index, { kind: event.target.value as Favorite["kind"] })}>
-                      <option value="movie">Film or show</option>
-                      <option value="artist">Artist</option>
-                      <option value="book">Book</option>
-                      <option value="any">Any supported type</option>
-                    </select>
-                  </label>
-                </div>
-              ))}
-            </div>
-          </section>
-          <section className="card">
-            <h2>Exact request</h2>
-            <p>The server freezes temperature, top-p, and the configured model for every arm. This preview is the customer context that will be sent to Gemini.</p>
-            {"error" in taskPreview ? <p>{taskPreview.error}</p> : <pre className="answer" data-testid="exact-request">{taskPreview.question}{"\n\n"}City: {taskPreview.city}{"\n"}Interests: {taskPreview.interests.map((item) => item.name).join(", ")}{"\n"}Budget: {taskPreview.budget} {taskPreview.currency}{"\n"}Language: {taskPreview.language}{"\n"}Requirements: {taskPreview.requirements}</pre>}
+            <label>The customer’s question
+              <textarea aria-label="Question" value={state.taskQuestion} onChange={(event) => update({ taskQuestion: event.target.value })} />
+            </label>
+            <label>Practical needs, optional
+              <input aria-label="Requirements" placeholder="Dietary needs, accessibility, travel distance..." value={state.profile.requirements} onChange={(event) => update({ profile: { ...state.profile, requirements: event.target.value } })} />
+            </label>
+            <details>
+              <summary>Exact request</summary>
+              {"error" in taskPreview ? <p>{taskPreview.error}</p> : <pre className="answer" data-testid="exact-request">{taskPreview.question}{"\n\n"}City: {taskPreview.city}{"\n"}Interests: {taskPreview.interests.map((item) => item.name).join(", ")}{"\n"}Budget: {taskPreview.budget} {taskPreview.currency}{"\n"}Language: {taskPreview.language}{"\n"}Requirements: {taskPreview.requirements}</pre>}
+            </details>
             <p className="muted">Estimated provider calls if you run the current cities: {estimate.total}. That is an estimate, not a charge.</p>
             {formError ? <p className="error" role="alert">{formError}</p> : null}
-            <div className="row-actions">
-              <button type="button" className="btn cyan" data-testid="run-audit" onClick={() => void start()} disabled={state.running || !preset}>
-                {state.running ? "Running" : "Run this case"}
-              </button>
-            </div>
           </section>
           {resultsReady(state) ? (
             <section className="card">
@@ -141,11 +165,43 @@ export function DemoStudio() {
               </div>
             </section>
           ) : null}
-          <ResultsBody showEmpty={false} />
+          <div className="run-bar">
+            <p className="muted">Same customer context for every approach.</p>
+            <button type="button" className="btn cyan" data-testid="run-audit" onClick={() => void start()} disabled={state.running || !preset}>
+              {state.running ? "Running" : "Review & run"}
+            </button>
+          </div>
         </div>
-        <ProgressCard />
+        <div className="stack">
+          <ProgressCard />
+          <CustomerRail />
+        </div>
       </div>
+      <Journey active={active} />
+      <ResultsBody showEmpty={false} />
     </div>
+  );
+}
+
+function CustomerRail() {
+  const { state } = useSession();
+  const interests = state.profile.favorites.filter((favorite) => favorite.name.trim());
+  return (
+    <aside className="card rail">
+      <h2>Your customer</h2>
+      <div className="mini-sky" aria-hidden="true">
+        <span style={{ left: "22%", top: "40%" }} />
+        <span style={{ left: "48%", top: "28%", background: "#ff4f9a" }} />
+        <span style={{ left: "70%", top: "48%" }} />
+        <span style={{ left: "40%", top: "62%" }} />
+      </div>
+      <p className="rail-name">{state.profile.label || "Customer"}</p>
+      <p className="muted">{state.cities[0] || "City not set"}</p>
+      <ul className="rail-tags">
+        {interests.map((favorite) => <li key={`${favorite.kind}-${favorite.name}`}>{favorite.name}</li>)}
+      </ul>
+      <p className="muted">Same context for every approach. Gemini receives this customer brief. Qloo receives the resolved interests.</p>
+    </aside>
   );
 }
 
@@ -161,7 +217,12 @@ function ProgressCard() {
   ];
   return (
     <aside className="card" data-testid="progress">
-      <h2>Progress</h2>
+      <h2>How your audit works</h2>
+      <ol className="how-list">
+        <li><span>1</span><div><strong>Choose an assistant</strong><p>Test a familiar assistant or build your own scenario.</p></div></li>
+        <li><span>2</span><div><strong>Add a customer</strong><p>Bring a real customer question or use one of ours.</p></div></li>
+        <li><span>3</span><div><strong>Compare the evidence</strong><p>See how the plain model and the Qloo revision differ.</p></div></li>
+      </ol>
       <ul className="stage-list">
         {rows.map(([label, status]) => (
           <li key={label}><span>{label}</span><span className={status === "failed" ? "pill bad" : "pill"} data-testid={`stage-${label.toLowerCase().replace(/\s+/g, "-")}`}>{status}</span></li>
