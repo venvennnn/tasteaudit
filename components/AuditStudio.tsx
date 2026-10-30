@@ -2,9 +2,10 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { SiteHeader } from "@/components/SiteHeader";
-import { ModeSwitch } from "@/components/ModeSwitch";
+import { Frame } from "@/components/Frame";
 import { Journey } from "@/components/Journey";
+import { ModeSwitch } from "@/components/ModeSwitch";
+import { ProofRail, StartRail, WhoRail, WhyRail } from "@/components/Rails";
 import { useSession } from "@/components/SessionProvider";
 import { estimateProviderCalls } from "@/lib/audit/estimate";
 import { buildTask } from "@/lib/audit/orchestrate";
@@ -14,16 +15,17 @@ import { activeCities, type Favorite } from "@/lib/session/state";
 const STEPS = ["Company", "Customer", "Task", "Review"] as const;
 const TITLES = [
   "Whose AI are we testing?",
-  "What makes your customer, them?",
+  "Meet the person. Understand the context.",
   "What should the assistant answer?",
-  "Review the request",
+  "Review the request.",
 ];
 const SUBS = [
   "Start with your company, or try a familiar assistant first.",
-  "Give every approach the same interests, context and constraints.",
+  "Every approach receives the same customer brief.",
   "This question is sent to every approach unchanged.",
   "The server freezes the model settings before the first call.",
 ];
+const WORDS = ["START\nHERE.", "WHO?", "WHY?", "PROOF?"];
 
 export function AuditStudio() {
   const { state, update, run } = useSession();
@@ -60,76 +62,44 @@ export function AuditStudio() {
     setStep((value) => Math.min(3, value + 1));
   }
 
+  const rail = step === 1 ? <WhoRail /> : step === 2 ? <WhyRail cta={false} /> : step === 3 ? <ProofRail /> : <StartRail action="demo" />;
+
   return (
-    <div className="workspace">
-      <SiteHeader tone="workspace" />
-      <div className="studio">
-        <div className="studio-main">
-          <p className="eyebrow">{String(step + 1).padStart(2, "0")} / {STEPS[step]}</p>
-          <h1>{TITLES[step]}</h1>
-          <p className="lede">{SUBS[step]}</p>
-          <ModeSwitch current="audit" />
-          <p className="memory" data-testid="session-memory-note">The audit stays in this tab’s memory. Download the result before you refresh. Provider requests leave this browser.</p>
-          <section className="card">
-            <div className="steps" aria-label="Audit steps">
-              {STEPS.map((label, index) => <span key={label} data-current={index === step}>{label}</span>)}
-            </div>
-            {step === 0 ? <CompanyStep /> : null}
-            {step === 1 ? <CustomerStep /> : null}
-            {step === 2 ? <TaskStep /> : null}
-            {step === 3 ? <ReviewStep estimate={estimate.total} lines={estimate.lines} /> : null}
-            {error ? <p className="error" role="alert">{error}</p> : null}
-            <div className="row-actions end">
-              {step > 0 ? <button type="button" className="btn ghost" onClick={() => setStep((value) => value - 1)}>Back</button> : null}
-              {step < 3 ? <button type="button" className="btn cyan" data-testid="step-next" onClick={next}>Continue</button> : (
-                <button type="button" className="btn cyan" data-testid="audit-start" onClick={() => {
-                  const task = buildTask(state, cities[0] ?? "", []);
-                  if ("error" in task) { setError(task.error); return; }
-                  void run([cities[0]]);
-                  router.push("/results");
-                }}>Review & run</button>
-              )}
-            </div>
-          </section>
+    <Frame
+      word={WORDS[step]}
+      rail={rail}
+      dock={(
+        <div className="dock">
+          <Journey active={step + 1} />
+          <div className="dock-actions">
+            {step > 0 ? <button type="button" className="text-btn" onClick={() => setStep((value) => value - 1)}>Back</button> : null}
+            {step < 3 ? (
+              <button type="button" className="btn" data-testid="step-next" onClick={next}>Continue <span aria-hidden="true">↗</span></button>
+            ) : (
+              <button type="button" className="btn" data-testid="audit-start" data-busy={state.running ? "true" : "false"} onClick={() => {
+                const task = buildTask(state, cities[0] ?? "", []);
+                if ("error" in task) { setError(task.error); return; }
+                void run([cities[0]]);
+                router.push("/results");
+              }}>Review & run <span aria-hidden="true">↗</span></button>
+            )}
+          </div>
         </div>
-        <aside className="card rail">
-          {step === 1 ? <CustomerRail /> : <HowRail />}
-        </aside>
+      )}
+    >
+      <p className="kicker">{String(step + 1).padStart(2, "0")} / {STEPS[step]}</p>
+      <h1>{TITLES[step]}</h1>
+      <p className="lede">{SUBS[step]}</p>
+      {step === 0 ? <ModeSwitch current="audit" /> : null}
+      <p className="memory" data-testid="session-memory-note">The audit stays in this tab’s memory. Download the result before you refresh. Provider requests leave this browser.</p>
+      <div key={step} className="view-swap">
+        {step === 0 ? <CompanyStep /> : null}
+        {step === 1 ? <CustomerStep /> : null}
+        {step === 2 ? <TaskStep /> : null}
+        {step === 3 ? <ReviewStep estimate={estimate.total} lines={estimate.lines} /> : null}
       </div>
-      <Journey active={step + 1} />
-    </div>
-  );
-}
-
-function HowRail() {
-  return (
-    <>
-      <h2>How your audit works</h2>
-      <ol className="how-list">
-        <li><span>1</span><div><strong>Choose an assistant</strong><p>Test a familiar assistant or describe your company. A company name does not connect its model.</p></div></li>
-        <li><span>2</span><div><strong>Add a customer</strong><p>Bring a real customer question or use one of ours.</p></div></li>
-        <li><span>3</span><div><strong>Compare the evidence</strong><p>See how mean affinity moves from the plain model to the Qloo revision.</p></div></li>
-      </ol>
-    </>
-  );
-}
-
-function CustomerRail() {
-  const { state } = useSession();
-  const interests = state.profile.favorites.filter((favorite) => favorite.name.trim());
-  return (
-    <>
-      <h2>Your customer</h2>
-      <div className="mini-sky" aria-hidden="true">
-        <span style={{ left: "24%", top: "38%" }} />
-        <span style={{ left: "50%", top: "30%", background: "#ff4f9a" }} />
-        <span style={{ left: "68%", top: "52%" }} />
-      </div>
-      <p className="rail-name">{state.profile.label || "Customer"}</p>
-      <p className="muted">{state.cities[0] || "City not set"}</p>
-      <ul className="rail-tags">{interests.map((favorite) => <li key={`${favorite.kind}-${favorite.name}`}>{favorite.name}</li>)}</ul>
-      <p className="muted">Same context for every approach. Gemini receives this customer brief.</p>
-    </>
+      {error ? <p className="error" role="alert">{error}</p> : null}
+    </Frame>
   );
 }
 
@@ -184,7 +154,6 @@ function CustomerStep() {
           </div>
         ))}
       </div>
-      <p className="section-label">A little context</p>
       <div className="context-grid">
         <label>City
           <input data-testid="city-input" value={state.cities[0] ?? ""} onChange={(event) => update({ cities: [event.target.value] })} />
@@ -231,7 +200,7 @@ function ReviewStep({ estimate, lines }: { estimate: number; lines: { label: str
   const { state } = useSession();
   const task = buildTask(state, activeCities(state)[0] ?? "", []);
   return (
-    <div>
+    <div className="stack">
       <h2>Authoritative specification</h2>
       {"error" in task ? <p className="error">{task.error}</p> : <pre className="answer">{JSON.stringify(task, null, 2)}</pre>}
       <p>Selected model: the server reads GEMINI_MODEL at call time, or uses {DEFAULT_GEMINI_MODEL} when that variable is unset, then keeps that identifier for the run. Gemini 3.8 does not accept temperature or top-p. Older models still use temperature {FROZEN_GENERATION.temperature} and top-p {FROZEN_GENERATION.topP}. Prompt {SYSTEM_PROMPT_VERSION}. Qloo calls go only to https://hackathon.api.qloo.com.</p>

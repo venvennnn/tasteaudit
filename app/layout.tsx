@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 import localFont from "next/font/local";
+import { RunBar } from "@/components/RunBar";
 import { SessionProvider } from "@/components/SessionProvider";
-import { Sky } from "@/components/Sky";
 import "./globals.css";
 
 const manrope = localFont({
@@ -20,9 +20,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en">
       <body className={manrope.className}>
-        <Sky />
         <SessionProvider>
           <a className="skip" href="#content">Skip to content</a>
+          <RunBar />
           <div id="content">{children}</div>
         </SessionProvider>
       </body>

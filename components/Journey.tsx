@@ -15,18 +15,17 @@ export function Journey({ active }: { active: number }) {
           const number = index + 1;
           const body = (
             <>
-              <span className="journey-dot" data-on={number <= active ? "true" : "false"} />
-              <span className="journey-label"><b>{step.n}</b> {step.label}</span>
+              <span className="dock-index">{step.n}</span>
+              <span className="dock-label">{step.label}</span>
             </>
           );
           return (
-            <li key={step.n} data-current={number === active ? "true" : "false"}>
-              {step.label === "Results" ? <Link href="/results">{body}</Link> : body}
+            <li key={step.n} data-current={number === active ? "true" : "false"} data-done={number < active ? "true" : "false"}>
+              {step.label === "Results" ? <Link href="/results" data-testid="nav-results">{body}</Link> : <span>{body}</span>}
             </li>
           );
         })}
       </ol>
-      <p>Session only · No login needed</p>
     </nav>
   );
 }

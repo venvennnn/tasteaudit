@@ -4,49 +4,51 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "@/components/SessionProvider";
 
-export function SiteHeader({ tone }: { tone: "hero" | "workspace" }) {
+export function SiteHeader() {
   const pathname = usePathname();
-  const { state, reset } = useSession();
-  const auditHref = state.scenario === "company" || pathname.startsWith("/audit") ? "/audit" : "/demo";
-  const links = tone === "hero"
-    ? [
-        { href: "/", label: "Overview", testId: "nav-overview" },
-        { href: "/#how", label: "How it works", testId: "nav-how" },
-        { href: "/methodology", label: "Methodology", testId: "nav-methodology" },
-      ]
-    : [
-        { href: "/", label: "Overview", testId: "nav-overview" },
-        { href: auditHref, label: "Your audit", testId: auditHref === "/demo" ? "nav-demo" : "nav-audit" },
-        { href: "/methodology", label: "Methodology", testId: "nav-methodology" },
-      ];
+  const { state } = useSession();
+  const company = state.scenario === "company" || pathname.startsWith("/audit");
+  const third = pathname === "/"
+    ? { href: "/demo", label: "Try the demo", testId: "cta-demo" }
+    : pathname.startsWith("/results")
+      ? { href: "#downloads", label: "Download session", testId: "nav-download" }
+      : company
+        ? { href: "/audit", label: "Your company", testId: "nav-audit" }
+        : { href: "/demo", label: "Try the demo", testId: "nav-demo" };
+
+  const links = [
+    { href: "/", label: "Product", testId: "nav-overview" },
+    { href: "/methodology", label: "Method", testId: "nav-methodology" },
+    third,
+  ];
 
   function current(href: string) {
     if (href === "/") return pathname === "/";
+    if (href.startsWith("/methodology")) return pathname.startsWith("/methodology");
     if (href.startsWith("/demo")) return pathname.startsWith("/demo");
     if (href.startsWith("/audit")) return pathname.startsWith("/audit");
-    if (href.startsWith("/methodology")) return pathname.startsWith("/methodology");
     return false;
   }
 
   return (
-    <header className={tone === "hero" ? "topbar" : "topbar workspace-bar"}>
-      <Link href="/" className="brand">TasteAudit</Link>
-      <nav className="nav-pill" aria-label="Primary">
+    <header className="topbar">
+      <Link href="/" className="brand">
+        TasteAudit
+        <span className="brand-mark" aria-hidden="true" />
+      </Link>
+      <nav className="nav" aria-label="Primary">
         {links.map((link) => (
-          <Link key={link.label} href={link.href} aria-current={current(link.href) ? "page" : undefined} data-testid={link.testId}>
+          <Link
+            key={link.label}
+            href={link.href}
+            aria-current={current(link.href) ? "page" : undefined}
+            data-testid={link.testId}
+          >
             {link.label}
+            {link.testId !== "nav-overview" && link.testId !== "nav-methodology" ? <span aria-hidden="true"> ↗</span> : null}
           </Link>
         ))}
       </nav>
-      <div className="bar-actions">
-        {tone === "workspace" ? (
-          <>
-            <Link href="/results" data-testid="nav-results" aria-current={pathname.startsWith("/results") ? "page" : undefined}>Results</Link>
-            <button type="button" className="text-btn" onClick={reset} data-testid="reset-session">Reset session</button>
-            <Link href="/" className="text-link">Back to home <span aria-hidden="true">↗</span></Link>
-          </>
-        ) : <span className="bar-spacer" aria-hidden="true" />}
-      </div>
     </header>
   );
 }

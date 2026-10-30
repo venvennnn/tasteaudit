@@ -15,7 +15,7 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
   if (!resultsReady(state) || cases.length === 0) {
     if (!showEmpty) return null;
     return (
-      <section className="card" data-testid="results-empty">
+      <section className="card" id="downloads" data-testid="results-empty">
         <h2>No measured change yet</h2>
         <p>Run a demo or a company audit in this tab. The affinity change appears after Qloo scores both the plain model’s names and the revision. Refreshing clears the run.</p>
         <div className="row-actions">
@@ -53,10 +53,10 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
         <AffinityChart points={points} />
         <CoverageChart coverage={cases.map((item) => ({ city: item.city, numerator: item.metrics?.scoreCoverage.numerator ?? 0, denominator: item.metrics?.scoreCoverage.denominator ?? 0 }))} />
       </section>
-      <section className="card">
+      <section id="downloads">
         <h2>Download this session</h2>
         <div className="row-actions">
-          <button type="button" className="btn cyan" data-testid="export-json" onClick={() => download("json")}>Download results</button>
+          <button type="button" className="btn" data-testid="export-json" onClick={() => download("json")}>Download evidence</button>
           <button type="button" className="btn ghost" data-testid="export-csv" onClick={() => download("csv")}>Download CSV</button>
           <button type="button" className="btn ghost" data-testid="export-answers" onClick={() => download("answers")}>Download answers</button>
         </div>
@@ -161,41 +161,48 @@ function CaseView({ item, compareAll, vote, onVote, onRecord, canRecord }: { ite
         {item.recorded ? <p className="pill" data-testid="recorded-label">Recorded {item.recorded.at} · {item.recorded.model}</p> : null}
       </div>
       <div className="result-layout">
-        <div className="compare-pair">
-          <article className="rec-panel">
-            <p className="panel-kicker">Original assistant</p>
-            <p className="muted">The plain model’s recommendations for this customer.</p>
-            <div className="answer" data-testid="original-answer">{item.originalAnswer}</div>
-            <div className="tile-grid">
-              {item.extracted.map((pick) => (
-                <button type="button" className="tile" key={pick.name} onClick={() => setOpen(pick.entityId ?? pick.name)}>
-                  <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true" />
-                  <strong>{pick.name}</strong>
-                  <small>{pick.matchStatus}</small>
-                  <small>Affinity {formatAffinity(scoreFor(item, pick.entityId)?.affinity ?? null)}</small>
-                </button>
-              ))}
+        <article className="rec-panel">
+          <div className="rec-head">
+            <span className="idx">01</span>
+            <div>
+              <h3>Original assistant</h3>
+              <p>A general recommendation based on the original prompt.</p>
             </div>
-          </article>
-          <article className="rec-panel">
-            <p className="panel-kicker">Qloo-assisted revision</p>
-            <p className="muted">A revision that can only choose from the scored allowlist.</p>
-            <div className="answer" data-testid="revised-answer">{item.revisedAnswer}</div>
-            <div className="tile-grid">
-              {item.revisedSelections.map((pick) => (
-                <button type="button" className="tile" key={pick.id} data-testid="evidence-open" onClick={() => setOpen(pick.id)}>
-                  <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true" />
-                  <strong>{pick.name}</strong>
-                  <small>Candidate from the allowlist</small>
-                  <small>Affinity {formatAffinity(scoreFor(item, pick.id)?.affinity ?? null)}</small>
-                </button>
-              ))}
+          </div>
+          <div className="tile-grid">
+            {item.extracted.map((pick) => (
+              <button type="button" className="tile" key={pick.name} onClick={() => setOpen(pick.entityId ?? pick.name)}>
+                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true" />
+                <strong>{pick.name}</strong>
+                <small>{pick.matchStatus}</small>
+                <small>Affinity {formatAffinity(scoreFor(item, pick.entityId)?.affinity ?? null)}</small>
+              </button>
+            ))}
+          </div>
+          <div className="answer" data-testid="original-answer">{item.originalAnswer}</div>
+        </article>
+        <article className="rec-panel">
+          <div className="rec-head">
+            <span className="idx">02</span>
+            <div>
+              <h3>Qloo-assisted revision</h3>
+              <p>A revision that can only choose from the scored allowlist.</p>
             </div>
-          </article>
-        </div>
-        <aside className="card behind" {...(open ? { role: "dialog" as const, "aria-label": "Evidence" } : { "aria-label": "Behind the recommendation" })}>
-          <h3>Behind the recommendation</h3>
-          {open ? <Evidence item={item} id={open} score={openScore} onClose={() => setOpen(null)} /> : <p className="muted">Open a recommendation to see its match, affinity, and explainability.</p>}
+          </div>
+          <div className="tile-grid">
+            {item.revisedSelections.map((pick) => (
+              <button type="button" className="tile" key={pick.id} data-testid="evidence-open" onClick={() => setOpen(pick.id)}>
+                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true" />
+                <strong>{pick.name}</strong>
+                <small>Candidate from the allowlist</small>
+                <small>Affinity {formatAffinity(scoreFor(item, pick.id)?.affinity ?? null)}</small>
+              </button>
+            ))}
+          </div>
+          <div className="answer" data-testid="revised-answer">{item.revisedAnswer}</div>
+        </article>
+        <aside className="proof" {...(open ? { role: "dialog" as const, "aria-label": "Evidence" } : { "aria-label": "Behind the recommendation" })}>
+          {open ? <Evidence item={item} id={open} score={openScore} onClose={() => setOpen(null)} /> : <p className="muted">Open a recommendation to inspect its match, affinity, and what is still missing.</p>}
         </aside>
       </div>
       {item.signals && !item.signals.geographicSignalApplied ? <p className="memory">A city filter was not applied to Qloo. Book scores are not city-conditioned. The city was still sent to Gemini.</p> : null}
@@ -211,19 +218,44 @@ function CaseView({ item, compareAll, vote, onVote, onRecord, canRecord }: { ite
 }
 
 function Evidence({ item, id, score, onClose }: { item: CaseRecord; id: string; score: ScoreRow | undefined; onClose: () => void }) {
+  const { download } = useSession();
+  const [tab, setTab] = useState<"evidence" | "answer" | "raw">("evidence");
   const resolved = score ?? scoreFor(item, id) ?? item.scores.find((row) => row.name === id);
   const checks = resolved ? item.checksById[resolved.entityId] ?? [] : [];
   const failed = checks.some((check) => check.verdict === "fail");
+  const contributions = resolved?.explainability.status === "available"
+    ? resolved.explainability.contributions.map((part) => `${part.name ?? part.entityId ?? "signal"} ${part.value}`).join(", ")
+    : "Shown when returned";
   return (
-    <div className="drawer">
-      <div className="row-actions"><strong>{resolved?.name ?? id}</strong><button type="button" className="btn ghost" onClick={onClose}>Close</button></div>
-      <p>Type: {resolved?.types.join(", ") || "Unavailable"}</p>
-      <p>Affinity: {formatAffinity(resolved?.affinity ?? null)} {resolved?.evidenceOrigin === "imported" ? <span className="pill warn">Imported evidence</span> : resolved?.evidenceOrigin === "provider" ? <span className="pill">Provider-signed</span> : <span className="pill warn">Unsigned</span>}</p>
-      <p>Explainability: {resolved?.explainability.status === "available" ? resolved.explainability.contributions.map((part) => `${part.name ?? part.entityId ?? "signal"} ${part.value}`).join(", ") : "Unavailable"}</p>
-      {resolved?.explainability.raw && resolved.explainability.status === "unavailable" ? <p>A payload was returned, but it had no numeric contributions to display.</p> : null}
-      <p>Retrieved: {resolved?.retrievedAt ?? "Unavailable"}</p>
-      {failed ? <p className="error">A verified constraint failed. Affinity does not override that failure.</p> : null}
-      <ul>{checks.map((check) => <li key={check.label}>{check.label}: {check.verdict}. {check.reason}</li>)}</ul>
+    <div className="proof-sheet">
+      <p className="kicker">Candidate</p>
+      <h3>{resolved?.name ?? id}</h3>
+      <div className="proof-tabs" role="tablist" aria-label="Candidate detail">
+        <button type="button" role="tab" aria-selected={tab === "evidence"} onClick={() => setTab("evidence")}>Evidence</button>
+        <button type="button" role="tab" aria-selected={tab === "answer"} onClick={() => setTab("answer")}>Original answer</button>
+        <button type="button" role="tab" aria-selected={tab === "raw"} onClick={() => setTab("raw")}>Raw response</button>
+      </div>
+      {tab === "evidence" ? (
+        <>
+          <span className="tile-art proof-art" style={{ background: artBackground(resolved?.name ?? id) }} aria-hidden="true" />
+          <dl className="proof-table">
+            <div><dt>Entity identity</dt><dd>{resolved?.types.join(", ") || "Review match"} · {resolved?.evidenceOrigin === "imported" ? "Imported evidence" : resolved?.evidenceOrigin === "provider" ? "Provider-signed" : "Unsigned"}</dd></div>
+            <div><dt>Qloo affinity</dt><dd>{formatAffinity(resolved?.affinity ?? null)}</dd></div>
+            <div><dt>Input contributions</dt><dd>{contributions}</dd></div>
+            <div><dt>Source timestamp</dt><dd>{resolved?.retrievedAt ?? "Included in live results"}</dd></div>
+          </dl>
+          {resolved?.explainability.raw && resolved.explainability.status === "unavailable" ? <p>A payload was returned, but it had no numeric contributions to display.</p> : null}
+          {failed ? <p className="error">A verified constraint failed. Affinity does not override that failure.</p> : null}
+          {checks.length > 0 ? <ul>{checks.map((check) => <li key={check.label}>{check.label}: {check.verdict}. {check.reason}</li>)}</ul> : null}
+          <p className="muted">Scores support a hypothesis. They do not establish customer satisfaction. Affinity is not a purchase probability.</p>
+        </>
+      ) : null}
+      {tab === "answer" ? <div className="answer">{item.originalAnswer}</div> : null}
+      {tab === "raw" ? <p>TasteAudit keeps the scored fields, not the raw provider payload. Affinity {formatAffinity(resolved?.affinity ?? null)}. Explainability {resolved?.explainability.status ?? "unavailable"}.</p> : null}
+      <div className="row-actions">
+        <button type="button" className="btn" onClick={onClose}>Back to comparison <span aria-hidden="true">↗</span></button>
+        <button type="button" className="btn ghost" onClick={() => download("json")}>Download evidence</button>
+      </div>
     </div>
   );
 }
