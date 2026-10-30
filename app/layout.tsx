@@ -1,10 +1,15 @@
 import type { Metadata } from "next";
-import { Manrope } from "next/font/google";
+import localFont from "next/font/local";
 import { SessionProvider } from "@/components/SessionProvider";
 import { Sky } from "@/components/Sky";
 import "./globals.css";
 
-const manrope = Manrope({ subsets: ["latin"], weight: ["300", "400", "500", "600", "700"] });
+const manrope = localFont({
+  src: "./fonts/manrope-latin-wght-normal.woff2",
+  weight: "200 800",
+  style: "normal",
+  display: "swap",
+});
 
 export const metadata: Metadata = {
   title: "TasteAudit",
