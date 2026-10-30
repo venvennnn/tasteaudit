@@ -4,51 +4,52 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useSession } from "@/components/SessionProvider";
 
-export function SiteHeader() {
-  const pathname = usePathname();
-  const { state } = useSession();
-  const company = state.scenario === "company" || pathname.startsWith("/audit");
-  const third = pathname === "/"
-    ? { href: "/demo", label: "Try the demo", testId: "cta-demo" }
-    : pathname.startsWith("/results")
-      ? { href: "#downloads", label: "Download session", testId: "nav-download" }
-      : company
-        ? { href: "/audit", label: "Your company", testId: "nav-audit" }
-        : { href: "/demo", label: "Try the demo", testId: "nav-demo" };
+const LINKS = [
+  { href: "/", label: "Overview", testId: "nav-overview" },
+  { href: "/demo", label: "Guided Demo", testId: "nav-demo" },
+  { href: "/audit", label: "Company Audit", testId: "nav-audit" },
+  { href: "/results", label: "Results", testId: "nav-results-header" },
+  { href: "/methodology", label: "Methodology", testId: "nav-methodology" },
+];
 
-  const links = [
-    { href: "/", label: "Product", testId: "nav-overview" },
-    { href: "/methodology", label: "Method", testId: "nav-methodology" },
-    third,
-  ];
+export function SiteHeader({ resettable = true }: { resettable?: boolean }) {
+  const pathname = usePathname();
+  const { reset } = useSession();
 
   function current(href: string) {
     if (href === "/") return pathname === "/";
-    if (href.startsWith("/methodology")) return pathname.startsWith("/methodology");
-    if (href.startsWith("/demo")) return pathname.startsWith("/demo");
-    if (href.startsWith("/audit")) return pathname.startsWith("/audit");
-    return false;
+    return pathname === href || pathname.startsWith(`${href}/`);
   }
 
   return (
-    <header className="topbar">
-      <Link href="/" className="brand">
-        TasteAudit
-        <span className="brand-mark" aria-hidden="true" />
-      </Link>
-      <nav className="nav" aria-label="Primary">
-        {links.map((link) => (
-          <Link
-            key={link.label}
-            href={link.href}
-            aria-current={current(link.href) ? "page" : undefined}
-            data-testid={link.testId}
-          >
-            {link.label}
-            {link.testId !== "nav-overview" && link.testId !== "nav-methodology" ? <span aria-hidden="true"> ↗</span> : null}
-          </Link>
-        ))}
-      </nav>
+    <header className="ta-header">
+      <div className="ta-header-inner">
+        <Link href="/" className="ta-brand">
+          <span className="ta-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" width="18" height="18">
+              <circle cx="12" cy="12" r="3" fill="none" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M12 3v3M12 18v3M3 12h3M18 12h3M5.6 5.6l2.1 2.1M16.3 16.3l2.1 2.1M18.4 5.6l-2.1 2.1M7.7 16.3l-2.1 2.1" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </span>
+          <span>
+            <strong>TasteAudit</strong>
+            <small>AI Recommendation Audits</small>
+          </span>
+        </Link>
+        <nav className="ta-nav" aria-label="Primary">
+          {LINKS.map((link) => (
+            <Link key={link.href} href={link.href} aria-current={current(link.href) ? "page" : undefined} data-testid={link.testId}>
+              {link.label}
+            </Link>
+          ))}
+        </nav>
+        <div className="ta-tools">
+          <span className="ta-chip"><i className="live-dot" aria-hidden="true" />Session: In-Memory</span>
+          {resettable ? (
+            <button type="button" className="ta-reset" data-testid="reset-session" onClick={reset}>Reset</button>
+          ) : null}
+        </div>
+      </div>
     </header>
   );
 }

@@ -11,6 +11,7 @@ import { activeCities, type CaseRecord, type CityPhase, type ScoreRow } from "@/
 export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
   const { state, compare, run, download, importText } = useSession();
   const ordered = orderedCases(state.cases, activeCities(state));
+  const [picked, setPicked] = useState("");
   if (ordered.length === 0) {
     if (!showEmpty) return null;
     return (
@@ -26,6 +27,7 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
     );
   }
   const [first, ...rest] = ordered;
+  const selectedCity = ordered.some((item) => item.city === picked) ? picked : first?.city ?? "";
   const evidence = ordered.some((item) => item.stages.score.status === "failed") ? "failed" : (first?.stages.score.status ?? "idle");
   const failedCity = ordered.find((item) => item.phase === "failed" || item.stages.score.status === "failed" || item.stages.revise.status === "failed");
   const completed = ordered.filter((item) => phaseOf(item) === "complete").length;
@@ -45,44 +47,36 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
       {state.seedStage.status === "failed" && state.seedStage.error ? <p className="error" role="alert">{state.seedStage.error.message}</p> : null}
       {state.source === "imported" ? <p data-testid="imported-label">Imported. Scores in this file are imported evidence, not a new provider verification.</p> : null}
       <span className="sr-only" data-testid="stage-evidence-check">{evidence}</span>
-      <section aria-label="Four city overview">
-        <table className="overview">
-          <thead>
-            <tr>
-              <th>City</th>
-              <th>Original affinity</th>
-              <th>Revised affinity</th>
-              <th>Change</th>
-              <th>Replacements</th>
-              <th>Coverage</th>
-            </tr>
-          </thead>
-          <tbody>
-            {ordered.map((item) => {
-              const outcome = cityOutcome(item);
-              const phase = phaseOf(item);
-              return (
-                <tr key={item.city} data-phase={phase}>
-                  <td data-label="City">{item.city}{phase !== "complete" ? <small>{phaseLabel(phase)}</small> : null}</td>
-                  <td data-label="Original affinity">{outcome.originalText}{scoreNote(phase, outcome.original.value)}</td>
-                  <td data-label="Revised affinity">{outcome.revisedText}{scoreNote(phase, outcome.revised.value)}</td>
-                  <td data-label="Change">{outcome.changeText}{outcome.change === null && phase === "complete" ? <small>Missing score</small> : null}</td>
-                  <td data-label="Replacements">{phase === "complete" ? outcome.replacements : "—"}</td>
-                  <td data-label="Coverage">
-                    {phase === "complete" ? `${formatRatio(outcome.originalCoverage)} → ${formatRatio(outcome.revisedCoverage)}` : "—"}
-                    {phase === "complete" && outcome.partial ? <small>Partial</small> : null}
-                    {phase === "failed" ? <button type="button" className="btn ghost" data-testid={failedCity?.city === item.city ? "retry-stage" : undefined} onClick={() => void run([item.city])}>Retry</button> : null}
-                  </td>
-                </tr>
-              );
-            })}
-          </tbody>
-        </table>
+      <section className="ta-panel" aria-label="Four city overview">
+        <div className="ta-panel-head">
+          <div>
+            <h2>1. Four-city overview</h2>
+            <p>Each card is this run’s own original mean, revised mean, and replacement count.</p>
+          </div>
+        </div>
+        <div className="city-card-grid" role="tablist" aria-label="Cities">
+          {ordered.map((item) => {
+            const outcome = cityOutcome(item);
+            const phase = phaseOf(item);
+            return (
+              <article key={item.city} className="city-score-card" data-selected={item.city === selectedCity ? "true" : "false"} data-phase={phase}>
+                <button type="button" role="tab" aria-selected={item.city === selectedCity} onClick={() => setPicked(item.city)}>{item.city}</button>
+                <p>{phase === "complete" ? "Complete" : phaseLabel(phase)}</p>
+                <p>Original {outcome.originalText}{scoreNote(phase, outcome.original.value)}</p>
+                <p>Revised {outcome.revisedText}{scoreNote(phase, outcome.revised.value)}</p>
+                <p>Change {outcome.changeText}</p>
+                <p>Replacements {phase === "complete" ? outcome.replacements : "—"}</p>
+                <p>Coverage {phase === "complete" ? `${formatRatio(outcome.originalCoverage)} → ${formatRatio(outcome.revisedCoverage)}` : "—"}{phase === "complete" && outcome.partial ? " Partial" : ""}</p>
+                {phase === "failed" ? <button type="button" className="btn ghost" data-testid={failedCity?.city === item.city ? "retry-stage" : undefined} onClick={() => void run([item.city])}>Retry</button> : null}
+              </article>
+            );
+          })}
+        </div>
         <CityDots rows={ordered.map((item) => ({ city: item.city, ...cityOutcome(item) }))} />
         <p className="results-note">Both affinity numbers come from Qloo. Gemini does not produce a separate affinity score. The dots compare the two arms inside a city. They are not a ranking of cities, and they are not proof of customer satisfaction.</p>
-      <SameRequestNote cases={ordered} />
+        <SameRequestNote cases={ordered} />
       </section>
-      <CityCompare cases={ordered} domain={state.domain} />
+      <CityCompare cases={ordered} domain={state.domain} city={selectedCity} />
       {rest.length >= 0 && state.assistantMode === "simulate" && !state.compareAll ? (
         <button type="button" className="text-btn" data-testid="compare-all" onClick={() => void compare()}>All four approaches</button>
       ) : null}
@@ -220,38 +214,36 @@ function CityDots({ rows }: { rows: Array<{ city: string; original: { value: num
   );
 }
 
-function CityCompare({ cases, domain }: { cases: CaseRecord[]; domain: "book" | "place" }) {
-  const [picked, setPicked] = useState(cases[0]?.city ?? "");
-  const city = cases.some((item) => item.city === picked) ? picked : cases[0]?.city ?? "";
+function CityCompare({ cases, domain, city }: { cases: CaseRecord[]; domain: "book" | "place"; city: string }) {
   const item = cases.find((entry) => entry.city === city);
   if (!item) return null;
   const diff = diffFor(item);
   const showLists = diff.added.length > 0 || diff.removed.length > 0;
   return (
-    <section>
-      <div className="city-tabs" role="tablist" aria-label="Cities">
-        {cases.map((entry) => (
-          <button key={entry.city} type="button" role="tab" aria-selected={entry.city === city} onClick={() => setPicked(entry.city)}>{entry.city}</button>
-        ))}
+    <section className="ta-panel">
+      <div className="ta-panel-head">
+        <div>
+          <h2>2. Selected city: {item.city}</h2>
+          <p>{geographyCopy(item, domain)}</p>
+        </div>
       </div>
-      <p className="results-note">{geographyCopy(item, domain)}</p>
       {item.recorded ? <p data-testid="recorded-label">Recorded {item.recorded.at} · {item.recorded.model}</p> : null}
       <div className="compare-cols">
-        <div>
-          <h2>Original Gemini</h2>
+        <div className="ta-arm">
+          <h3>Original Gemini</h3>
           {item.extracted.length === 0 ? <p>Waiting for the original recommendations.</p> : item.extracted.map((pick) => (
             <RecommendationCard key={`${pick.name}-${pick.entityId ?? "none"}`} item={item} name={pick.name} entityId={pick.entityId} badge={badgeFor(diff, pick.entityId, "original")} detail={pick.matchStatus} />
           ))}
         </div>
-        <div>
-          <h2>Qloo-assisted Gemini</h2>
+        <div className="ta-arm ta-arm-hot">
+          <h3>Qloo-assisted Gemini</h3>
           {item.revisedSelections.length === 0 ? <p>{phaseOf(item) === "failed" ? "This city failed before a revision was selected." : "The revised list appears after scoring."}</p> : item.revisedSelections.map((pick) => (
             <RecommendationCard key={pick.id} item={item} name={pick.name} entityId={pick.id} badge={badgeFor(diff, pick.id, "revised")} detail={pick.reason} openEvidence />
           ))}
         </div>
       </div>
       <section className="what-changed">
-        <h2>What changed?</h2>
+        <h2>3. What changed</h2>
         {showLists ? (
           <>
             <p>{diff.retainedCount} retained · {diff.replacementCount} replaced.</p>
@@ -274,8 +266,8 @@ function CityCompare({ cases, domain }: { cases: CaseRecord[]; domain: "book" | 
         <h3>Revised</h3>
         <div className="answer" data-testid="revised-answer">{item.revisedAnswer}</div>
       </details>
-      <details>
-        <summary>Inspect selection</summary>
+      <section className="inspect-block">
+        <h2>4. Inspect evidence</h2>
         <p>{item.diagnostic?.summary ?? diff.summary}</p>
         <p>{item.diagnostic?.geographyNote}</p>
         <p>Original ids: {item.diagnostic?.originalIds.join(", ") || "none"}.</p>
@@ -297,7 +289,7 @@ function CityCompare({ cases, domain }: { cases: CaseRecord[]; domain: "book" | 
         <ul>{(item.signals?.withheld ?? []).map((row) => <li key={row.name}>{row.name}: {row.reason}</li>)}</ul>
         {item.originalPrompt ? <pre className="answer">{item.originalPrompt}</pre> : null}
         {item.revisedPrompt ? <pre className="answer">{item.revisedPrompt}</pre> : null}
-      </details>
+      </section>
     </section>
   );
 }

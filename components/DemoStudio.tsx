@@ -122,7 +122,8 @@ export function DemoStudio() {
             {state.disclaimer ? <p className="muted">{state.disclaimer}</p> : null}
           </>
         ) : (
-          <>
+          <div className="demo-split">
+            <div>
             <h1>Meet the person.<br />Understand the context.</h1>
             <p className="lede">Every approach receives the same customer brief.</p>
             <section className="brief-block">
@@ -172,6 +173,8 @@ export function DemoStudio() {
                 </label>
               </div>
             </section>
+            </div>
+            <div>
             <section className="brief-block">
               <div className="brief-index"><span className="idx">03</span><div><h2>Four cities</h2><p>One audit runs every configured city. Interests, age, budget, and language stay the same.</p></div></div>
               <div>
@@ -197,7 +200,8 @@ export function DemoStudio() {
               {"error" in taskPreview ? <p>{taskPreview.error}</p> : <pre className="answer" data-testid="exact-request">{taskPreview.question}{"\n\n"}City: {taskPreview.city}{"\n"}Interests: {taskPreview.interests.map((item) => item.name).join(", ")}{"\n"}Budget: {taskPreview.budget} {taskPreview.currency}{"\n"}Language: {taskPreview.language}{"\n"}Requirements: {taskPreview.requirements}</pre>}
             </details>
             <p className="muted">Estimated provider calls for the four cities: {estimate.total}. That is an estimate, not a charge.</p>
-          </>
+            </div>
+          </div>
         )}
       </div>
       <p className="memory" data-testid="session-memory-note">
