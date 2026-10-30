@@ -215,7 +215,7 @@ describe("orchestration", () => {
     expect(state.cases.Chicago?.diagnostic?.unroundedRevisedMean).toBe(0.881);
     expect(state.cases.London?.diagnostic?.unroundedRevisedMean).toBe(0.881);
     expect(state.cases.Chicago?.diagnostic?.revisedAffinities).toEqual([{ entityId: garden, affinity: 0.881 }]);
-    expect(state.cases.Chicago?.diagnostic?.geographyNote).toBe("Affinity reflects explicit interests. Location was not applied to Qloo scoring.");
+    expect(state.cases.Chicago?.diagnostic?.geographyNote).toBe("Interest-based affinity. City was not applied to Qloo scoring.");
     expect(state.cases.Chicago?.diagnostic?.scoreParameters?.some((row) => row.name === "filter.location.query")).toBe(false);
     expect(state.cases.Chicago?.diagnostic?.locationAccounting?.scoringSignal).toMatch(/No geographic scoring signal/);
   });
@@ -241,6 +241,73 @@ describe("orchestration", () => {
     expect(state.cases.Osaka?.diagnostic?.scoreParameters?.find((row) => row.name === "filter.location.query")?.value).toBe("Osaka");
     expect(state.cases.Lisbon?.diagnostic?.locationAccounting?.scoringSignal).toMatch(/No geographic scoring signal/);
     expect(state.cases.Lisbon?.scores).not.toBe(state.cases.Osaka?.scores);
+  });
+
+  it("shares a book request for the same interests and separates a different reader", async () => {
+    const dune = "33333333-3333-3333-3333-333333333333";
+    const neuro = "44444444-4444-4444-4444-444444444444";
+    const found = "55555555-5555-5555-5555-555555555555";
+    const base = createSession();
+    let state = reducer(base, {
+      type: "update",
+      patch: {
+        domain: "book",
+        comparison: "readers",
+        recommendationCount: 1,
+        taskQuestion: "Recommend one book for my interests.",
+        cities: ["Ada", "Ben", "Chi"],
+        readers: [
+          { label: "Ada", favorites: [{ name: "Dune", kind: "book" }] },
+          { label: "Ben", favorites: [{ name: "Dune", kind: "book" }] },
+          { label: "Chi", favorites: [{ name: "Neuromancer", kind: "book" }] },
+        ],
+        profile: { ...base.profile, age: "34", favorites: [{ name: "Dune", kind: "book" }] },
+      },
+    });
+    const discoverBodies: { seedIds?: string[]; locationQuery?: string }[] = [];
+    const post = async <T,>(path: string, body: unknown): Promise<{ data: T; warnings: string[]; provenance: Record<string, unknown> }> => {
+      const record = body as { name?: string; seedIds?: string[]; locationQuery?: string };
+      if (path.endsWith("/search")) {
+        const id = record.name === "Neuromancer" ? neuro : dune;
+        return { data: { candidates: [{ entityId: id, name: record.name, types: ["urn:entity:book"] }], match: { status: "exact", ambiguous: false, entity: { entityId: id, name: record.name, types: ["urn:entity:book"] } } } as T, warnings: [], provenance: {} };
+      }
+      if (path.endsWith("/original")) return { data: { answer: "Read Dune." } as T, warnings: [], provenance: { requestedModel: "gemini-test" } };
+      if (path.endsWith("/extract")) return { data: { picks: [{ name: "Dune", quote: "Dune" }] } as T, warnings: [], provenance: {} };
+      if (path.endsWith("/discover")) {
+        discoverBodies.push({ seedIds: record.seedIds, locationQuery: record.locationQuery });
+        return { data: { entities: [{ entityId: found, name: "Quiet Book", types: ["urn:entity:book"] }], geographicSignalApplied: false, locality: null } as T, warnings: [], provenance: {} };
+      }
+      if (path.endsWith("/score")) {
+        const readerSeed = record.seedIds?.[0];
+        const discoveredAffinity = readerSeed === neuro ? 0.2 : 0.7;
+        return { data: { entities: [
+          { entityId: dune, name: "Dune", types: ["urn:entity:book"], affinity: 0.1, explainability: { status: "unavailable", contributions: [], warning: null, raw: null }, language: null, description: null, tags: [], envelope: null, evidenceOrigin: "unsigned" },
+          { entityId: found, name: "Quiet Book", types: ["urn:entity:book"], affinity: discoveredAffinity, explainability: { status: "unavailable", contributions: [], warning: null, raw: null }, language: null, description: null, tags: [], envelope: null, evidenceOrigin: "unsigned" },
+        ], missingIds: [], geographicSignalApplied: false, locality: null, signing: false } as T, warnings: [], provenance: {} };
+      }
+      return { data: { selections: [{ id: found, reason: "Selected from the returned score." }], answer: "Revised around Quiet Book." } as T, warnings: [], provenance: { requestedModel: "gemini-test" } };
+    };
+    await executeRun({
+      state,
+      cities: ["Ada", "Ben", "Chi"],
+      signal: new AbortController().signal,
+      post,
+      onSeeds: (seeds, stage) => { state = reducer(state, { type: "seeds", seeds, stage }); },
+      onCase: (city, patch) => { state = reducer(state, { type: "patch-case", city, patch }); },
+    });
+    expect(discoverBodies).toHaveLength(2);
+    expect(discoverBodies.every((body) => body.locationQuery === undefined)).toBe(true);
+    expect(state.cases.Ada?.diagnostic?.requestKey).toBe(state.cases.Ben?.diagnostic?.requestKey);
+    expect(state.cases.Chi?.diagnostic?.requestKey).not.toBe(state.cases.Ada?.diagnostic?.requestKey);
+    expect(state.cases.Ada?.diagnostic?.unroundedRevisedMean).toBe(0.7);
+    expect(state.cases.Ben?.diagnostic?.unroundedRevisedMean).toBe(0.7);
+    expect(state.cases.Chi?.diagnostic?.unroundedRevisedMean).toBe(0.2);
+    expect(state.cases.Ada?.diagnostic?.geographyNote).toBe("Interest-based affinity. City was not applied to Qloo scoring.");
+    expect(state.cases.Ada?.diagnostic?.locationAccounting?.scoringSignal).toMatch(/No geographic scoring signal/);
+    expect(state.cases.Ada?.diagnostic?.locationAccounting?.gemini).toMatch(/No city was sent to Qloo/);
+    expect(state.cases.Ada?.revisedPrompt).not.toMatch(/not authenticated/i);
+    expect(state.cases.Ada?.revisedPrompt).toMatch(/Qloo affinity returned/);
+    expect(state.cases.Ada?.revisedPrompt).toMatch(/Price, edition and stock unverified/);
   });
 });
 

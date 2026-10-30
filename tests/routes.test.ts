@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { POST as search } from "@/app/api/qloo/search/route";
 import { POST as score } from "@/app/api/qloo/score/route";
 import { POST as repair } from "@/app/api/gemini/repair/route";
+import { generateStructured } from "@/lib/providers/gemini";
 import { resetInstanceCapacity } from "@/lib/http/route";
 import { redactSecrets } from "@/lib/security/redact";
 import { signEvidence, verifyEvidence } from "@/lib/security/sign";
@@ -193,6 +194,47 @@ describe("provider routes", () => {
     const revision = await repaired.json();
     expect(revision.warnings.join(" ")).toMatch(/not treated as provider-authenticated/i);
     expect(JSON.stringify(revision)).not.toContain("server-key-should-not-leak");
+    const prompt = String(vi.mocked(generateStructured).mock.calls.at(-1)?.[0]?.prompt ?? "");
+    expect(prompt).not.toMatch(/not authenticated/i);
+    expect(prompt).not.toContain("0.99");
+    expect(prompt).toContain("Unavailable");
+  });
+
+  it("passes an unsigned returned affinity without asking the writer to judge authentication", async () => {
+    delete process.env.EVIDENCE_SIGNING_SECRET;
+    const repaired = await repair(call("/api/gemini/repair", {
+      task: {
+        question: "Recommend three books for my interests, preferred language and budget.",
+        count: 1,
+        domain: "book",
+        companyName: "Lamp",
+        assistantPurpose: "Books",
+        age: 34,
+        city: "",
+        country: "United States",
+        budget: "45",
+        currency: "USD",
+        language: "English",
+        requirements: "No horror.",
+        interests: [{ name: "Dune", kind: "book", entityId: seed }],
+      },
+      seedIds: [seed],
+      candidates: [{
+        entityId: id,
+        name: "Dune",
+        affinity: 0.42,
+        evidenceOrigin: "unsigned",
+        explainability: { status: "unavailable", contributions: [] },
+        notes: ["Price, edition and stock unverified"],
+      }],
+    }));
+    const revision = await repaired.json();
+    expect(revision.warnings.join(" ")).not.toMatch(/not treated as provider-authenticated/i);
+    const prompt = String(vi.mocked(generateStructured).mock.calls.at(-1)?.[0]?.prompt ?? "");
+    expect(prompt).toContain("affinity 0.42");
+    expect(prompt).toContain("Qloo affinity returned");
+    expect(prompt).toContain("Price, edition and stock unverified");
+    expect(prompt).not.toMatch(/not authenticated/i);
   });
 
   it("redacts configured secrets from text", () => {

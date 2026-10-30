@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Cover } from "@/components/Cover";
 import { Frame } from "@/components/Frame";
 import { DEFAULT_GEMINI_MODEL } from "@/lib/schemas/limits";
-import { DEMO_PLACE_CITIES } from "@/lib/session/presets";
+import { DEMO_BOOK_READERS, DEMO_PLACE_CITIES } from "@/lib/session/presets";
 
 const SEEDS = [
   { name: "Spirited Away", kind: "movie" as const, label: "Movie" },
@@ -30,7 +30,7 @@ export function HomeStage() {
         <div className="ta-pills">
           <span>Session only</span>
           <span>No database</span>
-          <span>Same brief in every city</span>
+          <span>Places by city, books by interest</span>
         </div>
       </section>
       <section className="ta-panel" aria-label="How the two arms differ">
@@ -74,16 +74,34 @@ export function HomeStage() {
       <section className="ta-cities">
         <div className="ta-panel-head">
           <div>
-            <p className="kicker">Four-city demo</p>
-            <h2>One brief. Four places.</h2>
+            <p className="kicker">Place experiment</p>
+            <h2>One brief. Four cities.</h2>
           </div>
-          <p>The concierge demo keeps the same interests and changes only the city in the request. The bookseller demo uses a different set of four cities. Book affinity stays interest-only.</p>
+          <p>The concierge demo keeps the same interests and sends each city as filter.location.query. That is a locality candidate filter. It does not condition affinity.</p>
         </div>
         <div className="city-card-grid">
           {DEMO_PLACE_CITIES.map((city) => (
             <article key={city} className="city-score-card">
               <strong>{city}</strong>
               <p>Compared when you run the place demo. The page shows that city’s own ids, affinities, and request.</p>
+              <Link href="/demo">Open the demo</Link>
+            </article>
+          ))}
+        </div>
+      </section>
+      <section className="ta-cities">
+        <div className="ta-panel-head">
+          <div>
+            <p className="kicker">Book experiment</p>
+            <h2>Four readers. Different interests.</h2>
+          </div>
+          <p>The bookseller demo compares explicitly supplied interest lists. Interest-based affinity. City was not applied to Qloo scoring.</p>
+        </div>
+        <div className="city-card-grid">
+          {DEMO_BOOK_READERS.map((reader) => (
+            <article key={reader.label} className="city-score-card">
+              <strong>{reader.label}</strong>
+              <p>{reader.favorites.map((favorite) => favorite.name).join(", ")}</p>
               <Link href="/demo">Open the demo</Link>
             </article>
           ))}

@@ -1,6 +1,7 @@
 import { ageBandLabel, ageToSupportedBand } from "@/lib/audit/age";
 import { verifyConstraints } from "@/lib/audit/constraints";
-import { geographyNote } from "@/lib/audit/geography";
+import { evidenceNotes, evidenceStatuses, priceEditionStockChecked } from "@/lib/audit/evidence";
+import { geographyNote, INTEREST_AFFINITY_NOTE } from "@/lib/audit/geography";
 import { insightsParameters } from "@/lib/providers/qloo";
 import { configurationHash } from "@/lib/audit/hash";
 import { buildCaseMetrics, meanObserved } from "@/lib/audit/metrics";
@@ -17,6 +18,7 @@ import {
   emptyCase,
   type CasePatch,
   type CaseRecord,
+  type Favorite,
   type NamedPick,
   type ResolvedSeed,
   type ScoreRow,
@@ -109,10 +111,13 @@ export function parseAge(value: string): number | null {
 export function buildTask(state: SessionState, city: string, seeds: ResolvedSeed[]): TaskSpec | { error: string } {
   const age = parseAge(state.profile.age);
   if (state.profile.age.trim() && age === null) return { error: "Age must be a whole number from 0 to 120, or left blank." };
-  const favorites = state.profile.favorites.map((favorite) => favorite.name.trim()).filter(Boolean);
+  const reader = state.comparison === "readers"
+    ? state.readers.find((item) => item.label.toLowerCase() === city.trim().toLowerCase())
+    : undefined;
+  const favorites = (reader?.favorites ?? state.profile.favorites).map((favorite) => favorite.name.trim()).filter(Boolean);
   if (favorites.length === 0) return { error: "Add at least one explicit interest." };
   if (!state.taskQuestion.trim()) return { error: "Write the question the assistant should answer." };
-  if (!city.trim()) return { error: "Add a city before running." };
+  if (!reader && !city.trim()) return { error: "Add a city before running." };
   return {
     question: state.taskQuestion.trim(),
     count: state.recommendationCount,
@@ -120,13 +125,13 @@ export function buildTask(state: SessionState, city: string, seeds: ResolvedSeed
     companyName: state.company.name.trim(),
     assistantPurpose: state.company.purpose.trim(),
     age,
-    city: city.trim(),
+    city: reader ? "" : city.trim(),
     country: state.profile.country.trim(),
     budget: state.profile.budget.trim(),
     currency: state.profile.currency.trim(),
     language: state.profile.language.trim(),
     requirements: state.profile.requirements.trim(),
-    interests: state.profile.favorites
+    interests: (reader?.favorites ?? state.profile.favorites)
       .filter((favorite) => favorite.name.trim())
       .map((favorite) => {
         const seed = seeds.find((item) => item.query === favorite.name.trim());
@@ -164,7 +169,7 @@ function signalSnapshot(input: {
   } else {
     withheld.push({
       name: "Location scoring signal",
-      reason: "Affinity reflects explicit interests. Location was not applied to Qloo scoring. The book entity-type guide does not list a location filter or signal.location.query. The parameter dictionary lists signal.location.query for Book and does not list filter.location.query for Book. Neither was sent.",
+      reason: `${INTEREST_AFFINITY_NOTE} The book entity-type guide does not list filter.location, filter.location.query, signal.location, or signal.location.query. The parameter dictionary lists signal.location and signal.location.query for Book, and lists filter.location.query for Destination and Place only. None of those location parameters were sent.`,
     });
   }
   if (input.ageBand) {
@@ -209,6 +214,58 @@ async function resolveName(
   return response.data;
 }
 
+async function resolveFavoriteList(
+  post: Poster,
+  signal: AbortSignal,
+  favorites: Favorite[],
+  overrides: Record<string, string>,
+  searchCache: Map<string, Promise<SearchData>>,
+): Promise<ResolvedSeed[]> {
+  return pooled(favorites.filter((favorite) => favorite.name.trim()), 2, async (favorite) => {
+    const query = favorite.name.trim();
+    const types = searchTypesForKind(favorite.kind);
+    const cacheKey = `${types.join("|")}\n${query.toLowerCase()}`;
+    let pending = searchCache.get(cacheKey);
+    if (!pending) {
+      pending = resolveName(post, signal, query, types);
+      searchCache.set(cacheKey, pending);
+    }
+    const data = await pending;
+    const override = overrides[query];
+    const corrected = override ? data.candidates.find((candidate) => candidate.entityId === override) : undefined;
+    if (corrected) {
+      return {
+        query,
+        kind: favorite.kind,
+        status: "corrected" as const,
+        ambiguous: false,
+        entityId: corrected.entityId,
+        name: corrected.name,
+        types: corrected.types,
+        alternatives: data.candidates.map((candidate) => ({
+          entityId: candidate.entityId,
+          name: candidate.name,
+          types: candidate.types,
+        })),
+      };
+    }
+    return {
+      query,
+      kind: favorite.kind,
+      status: data.match.status,
+      ambiguous: data.match.ambiguous,
+      entityId: data.match.entity?.entityId ?? null,
+      name: data.match.entity?.name ?? null,
+      types: data.match.entity?.types ?? [],
+      alternatives: data.candidates.map((candidate) => ({
+        entityId: candidate.entityId,
+        name: candidate.name,
+        types: candidate.types,
+      })),
+    };
+  });
+}
+
 export async function executeRun(options: {
   state: SessionState;
   cities: string[];
@@ -221,48 +278,16 @@ export async function executeRun(options: {
 }): Promise<void> {
   const { state, post, signal } = options;
   const cities = options.cities.map((city) => city.trim()).filter(Boolean).slice(0, LIMITS.cities);
-  let seeds = state.seeds;
-  if (seeds.length === 0 || state.seedStage.status !== "complete") {
+  const searchCache = new Map<string, Promise<SearchData>>();
+  const readerRun = state.comparison === "readers";
+  let sharedSeeds = state.seeds;
+  if (!readerRun && (sharedSeeds.length === 0 || state.seedStage.status !== "complete")) {
     options.onSeeds([], { status: "running", error: null });
     const favorites = state.profile.favorites.filter((favorite) => favorite.name.trim());
     try {
-      const resolved = await pooled(favorites, 2, async (favorite) => {
-        const data = await resolveName(post, signal, favorite.name.trim(), searchTypesForKind(favorite.kind));
-        const override = state.seedOverrides[favorite.name.trim()];
-        const corrected = override ? data.candidates.find((candidate) => candidate.entityId === override) : undefined;
-        if (corrected) {
-          return {
-            query: favorite.name.trim(),
-            kind: favorite.kind,
-            status: "corrected" as const,
-            ambiguous: false,
-            entityId: corrected.entityId,
-            name: corrected.name,
-            types: corrected.types,
-            alternatives: data.candidates.map((candidate) => ({
-              entityId: candidate.entityId,
-              name: candidate.name,
-              types: candidate.types,
-            })),
-          };
-        }
-        return {
-          query: favorite.name.trim(),
-          kind: favorite.kind,
-          status: data.match.status,
-          ambiguous: data.match.ambiguous,
-          entityId: data.match.entity?.entityId ?? null,
-          name: data.match.entity?.name ?? null,
-          types: data.match.entity?.types ?? [],
-          alternatives: data.candidates.map((candidate) => ({
-            entityId: candidate.entityId,
-            name: candidate.name,
-            types: candidate.types,
-          })),
-        };
-      });
-      seeds = resolved;
-      options.onSeeds(seeds, { status: "complete", error: null });
+      const resolved = await resolveFavoriteList(post, signal, favorites, state.seedOverrides, searchCache);
+      sharedSeeds = resolved;
+      options.onSeeds(sharedSeeds, { status: "complete", error: null });
     } catch (error) {
       const failure = failureOf(error);
       if (failure.code === "aborted") return;
@@ -279,16 +304,33 @@ export async function executeRun(options: {
     }
   }
 
-  const seedIds = seeds.map((seed) => seed.entityId).filter((id): id is string => Boolean(id));
   const age = parseAge(state.profile.age);
   const ageBand = ageToSupportedBand(age);
-  // Books have no supported location parameter, so every city would send the same discovery request.
-  // One request is reused, then copied into each city. It is not a location cache.
-  let bookDiscovery: Promise<ApiOk<DiscoverData>> | null = null;
+  // Identical book interest sets send one discovery request, then each case gets its own copy.
+  // Different interest sets do not share that request. This is not a location cache.
+  const bookDiscoveries = new Map<string, Promise<ApiOk<DiscoverData>>>();
 
   await pooled(cities, 2, async (city) => {
     const signal = options.signalFor?.(city) ?? options.signal;
     if (signal.aborted || (options.isCurrent && !options.isCurrent(city))) return;
+    const reader = readerRun ? state.readers.find((item) => item.label.toLowerCase() === city.toLowerCase()) : undefined;
+    let seeds = sharedSeeds;
+    if (reader) {
+      try {
+        seeds = await resolveFavoriteList(post, signal, reader.favorites, state.seedOverrides, searchCache);
+      } catch (error) {
+        const failure = failureOf(error);
+        if (failure.code === "aborted") return;
+        if (options.isCurrent && !options.isCurrent(city)) return;
+        options.onCase(city, {
+          phase: "failed",
+          warnings: [failure.message],
+          stages: { original: { status: "failed", error: failure } },
+        });
+        return;
+      }
+    }
+    const seedIds = seeds.map((seed) => seed.entityId).filter((id): id is string => Boolean(id));
     const task = buildTask({ ...state, seeds }, city, seeds);
     if ("error" in task) {
       options.onCase(city, {
@@ -397,15 +439,20 @@ export async function executeRun(options: {
         patch({ phase: "discovering", stages: { discover: { status: "running", error: null } } });
         let data: DiscoverData;
         if (state.domain === "book") {
-          bookDiscovery ??= post<DiscoverData>("/api/qloo/discover", {
-            domain: state.domain,
-            seedIds,
-            ageBand: ageBand ?? undefined,
-          }, options.signal);
-          const response = await bookDiscovery;
+          const discoveryKey = `${[...seedIds].sort().join(",")}|${ageBand ?? ""}`;
+          let pending = bookDiscoveries.get(discoveryKey);
+          if (!pending) {
+            pending = post<DiscoverData>("/api/qloo/discover", {
+              domain: state.domain,
+              seedIds,
+              ageBand: ageBand ?? undefined,
+            }, options.signal);
+            bookDiscoveries.set(discoveryKey, pending);
+          }
+          const response = await pending;
           data = response.data;
           warnings.push(...response.warnings);
-          warnings.push("Book discovery is interest-based. A city filter was not sent to Qloo.");
+          warnings.push(INTEREST_AFFINITY_NOTE);
         } else {
           const response = await post<DiscoverData>("/api/qloo/discover", {
             domain: state.domain,
@@ -594,7 +641,9 @@ export async function executeRun(options: {
         discoverParameters: parameterRows(discoverSpec.parameters),
         scoreParameters: parameterRows(scoreSpec.parameters),
         locationAccounting: {
-          gemini: `The city ${city} is included in the Gemini brief.`,
+          gemini: reader
+            ? `Reader ${reader.label}. No city was sent to Qloo.`
+            : `The city ${city} is included in the Gemini brief.`,
           candidateFilter: scoreSpec.locationFilterApplied
             ? `filter.location.query=${city} on discovery and scoring.`
             : "No locality filter was sent to Qloo.",
@@ -621,14 +670,20 @@ export async function executeRun(options: {
         const chosen = new Map(selection.selected.map((item) => [item.entityId.toLowerCase(), item]));
         const lines: GroundingLine[] = revisedSelections.map((item) => {
           const row = scoreById.get(item.id.toLowerCase());
+          const pick = extracted.find((entry) => entry.entityId?.toLowerCase() === item.id.toLowerCase());
+          const statuses = evidenceStatuses({
+            domain: state.domain,
+            affinity: row?.affinity ?? null,
+            origin: row?.evidenceOrigin ?? null,
+            explainabilityAvailable: row?.explainability.status === "available",
+            identityProvisional: Boolean(pick && (pick.matchStatus === "provisional" || pick.ambiguous)),
+            priceChecked: priceEditionStockChecked(checksById[item.id] ?? []),
+          });
           return {
             id: item.id,
             name: item.name,
             affinity: row?.affinity ?? null,
-            authenticated: false,
-            explainability: row?.explainability.status === "available"
-              ? row.explainability.contributions.map((part) => `${part.name ?? part.entityId ?? "signal"} ${part.value}`).join("; ")
-              : "Unavailable",
+            statuses,
           };
         });
         const response = await post<RepairData>("/api/gemini/repair", {
@@ -636,6 +691,7 @@ export async function executeRun(options: {
           seedIds,
           candidates: revisedSelections.map((item) => {
             const row = scoreById.get(item.id.toLowerCase());
+            const line = lines.find((entry) => entry.id.toLowerCase() === item.id.toLowerCase());
             return {
               entityId: item.id,
               name: item.name,
@@ -643,6 +699,7 @@ export async function executeRun(options: {
               explainability: row?.explainability,
               envelope: row?.envelope ?? undefined,
               evidenceOrigin: row?.evidenceOrigin === "imported" ? "imported" : row?.envelope ? "provider" : "unsigned",
+              notes: evidenceNotes(line?.statuses ?? []),
             };
           }),
         }, signal);

@@ -868,6 +868,10 @@ summary { cursor: pointer; font-weight: 700; }
 .ta-cities { margin: 8px 0 18px; }
 .pick-row, .interest-chip, input, textarea, select { border-radius: 10px; }
 .dock { border: 1px solid var(--line); border-radius: 14px; background: white; margin-top: 8px; }
+.reader-lists { display: grid; gap: 12px; }
+.reader-card { min-width: 0; }
+.reader-card h3 { margin: 0 0 6px; font-size: 1rem; }
+.reader-card .interest-chip { margin-bottom: 6px; }
 
 @media (max-width: 900px) {
   .ta-arm-grid, .demo-split, .ta-steps, .city-card-grid, .ta-metrics { grid-template-columns: minmax(0, 1fr); }

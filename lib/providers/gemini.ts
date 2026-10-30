@@ -106,7 +106,7 @@ function customerBlock(task: TaskSpec): string {
     `Company label: ${task.companyName || "Unnamed company"}`,
     `Assistant purpose: ${task.assistantPurpose || "Not stated"}`,
     `Domain: ${task.domain === "book" ? "book recommendations" : "place recommendations"}`,
-    `City supplied by the customer: ${task.city || "Not stated"}`,
+    `City supplied by the customer: ${task.city || "Not applied"}`,
     `Country: ${task.country || "Not stated"}`,
     `Age supplied by the customer: ${task.age ?? "Not stated"}`,
     `Budget: ${task.budget || "Not stated"} ${task.currency}`.trim(),
@@ -153,24 +153,26 @@ export type GroundingLine = {
   id: string;
   name: string;
   affinity: number | null;
-  authenticated: boolean;
-  explainability: string;
+  statuses: string[];
 };
 
 export function repairPrompt(task: TaskSpec, lines: GroundingLine[]): string {
   const evidence = lines
     .map((line) => {
-      const score = line.authenticated && line.affinity !== null ? `affinity ${line.affinity}` : "affinity not authenticated for this request";
-      return `- id ${line.id} | ${line.name} | ${score} | explainability: ${line.explainability}`;
+      const score = line.affinity === null || !Number.isFinite(line.affinity) ? "affinity Unavailable" : `affinity ${line.affinity}`;
+      const statuses = line.statuses.length > 0 ? line.statuses.join("; ") : "No evidence status";
+      return `- id ${line.id} | ${line.name} | ${score} | ${statuses}`;
     })
     .join("\n");
   return [
     "These recommendations were already selected. Write the revised answer for this list only.",
     "Return every supplied id, in the same order. Do not add, drop, or reorder ids.",
-    "For each id, write one or two sentences. Use only the supplied affinity and explainability.",
-    "Do not invent contribution weights, customer behavior, opening hours, stock, prices, or accessibility.",
-    "If a practical fact was not supplied, say it is unverified.",
-    "If explainability says Unavailable, do not create weights.",
+    "For each id, write one or two sentences from the supplied affinity and the supplied evidence statuses.",
+    "Do not decide whether a provider score is authenticated.",
+    "If affinity says Unavailable, do not invent a number.",
+    "Do not invent contribution weights, customer behavior, opening hours, stock, prices, editions, or accessibility.",
+    "If a status says Explainability unavailable, do not create weights.",
+    "If a status says Price, edition and stock unverified, do not invent price, edition, or stock.",
     customerBlock(task),
     "Selected recommendations:",
     evidence,

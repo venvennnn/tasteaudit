@@ -7,6 +7,7 @@ export function estimateProviderCalls(input: {
   domain: Domain;
   mode: "simulate" | "paste";
   compare: boolean;
+  distinctInterestSets?: number;
 }): { total: number; lines: { label: string; count: number }[] } {
   const cities = Math.max(1, input.cityCount);
   const lines: { label: string; count: number }[] = [
@@ -23,7 +24,7 @@ export function estimateProviderCalls(input: {
   });
   lines.push({
     label: "Discover candidates",
-    count: input.domain === "place" ? cities : 1,
+    count: input.domain === "place" ? cities : Math.max(1, input.distinctInterestSets ?? 1),
   });
   lines.push({ label: "Score the shared pool", count: cities });
   lines.push({ label: "Grounded revision", count: cities });
