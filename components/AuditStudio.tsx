@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { Cover } from "@/components/Cover";
 import { Frame } from "@/components/Frame";
 import { Journey } from "@/components/Journey";
 import { ModeSwitch } from "@/components/ModeSwitch";
@@ -144,6 +145,7 @@ function CustomerStep() {
       <div className="interest-list">
         {state.profile.favorites.map((favorite, index) => (
           <div className="interest-chip" key={index}>
+            {favorite.name.trim() ? <Cover name={favorite.name} kind={favorite.kind} /> : null}
             <select className="chip-kind" aria-label={`Kind ${index + 1}`} value={favorite.kind} onChange={(event) => edit(index, { kind: event.target.value as Favorite["kind"] })}>
               <option value="movie">Movie</option>
               <option value="artist">Artist</option>
@@ -154,6 +156,7 @@ function CustomerStep() {
           </div>
         ))}
       </div>
+      <p className="muted">Pictures come from Wikipedia, Open Library, or Deezer. They are the first matching catalog image, not a score.</p>
       <div className="context-grid">
         <label>City
           <input data-testid="city-input" value={state.cities[0] ?? ""} onChange={(event) => update({ cities: [event.target.value] })} />

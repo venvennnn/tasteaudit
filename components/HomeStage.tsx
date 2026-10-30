@@ -2,12 +2,20 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
+import { Cover } from "@/components/Cover";
 import { Frame } from "@/components/Frame";
 import { WhyRail } from "@/components/Rails";
+import type { ArtworkKind } from "@/lib/catalog/rank";
 
 const CITIES = ["New York", "Kuala Lumpur", "Osaka"] as const;
 type City = (typeof CITIES)[number];
 type Assistant = "concierge" | "bookseller";
+
+const INTERESTS: Array<{ name: string; kind: ArtworkKind; label: string }> = [
+  { name: "Radiohead", kind: "artist", label: "Music" },
+  { name: "Spirited Away", kind: "movie", label: "Movie" },
+  { name: "Dune", kind: "book", label: "Book" },
+];
 
 const PALETTES: Record<City, string[][]> = {
   "New York": [["#241c16", "#d9c3a2", "#8e877c"], ["#16181d", "#e6d3a4", "#6d5848"], ["#d7d2cb", "#8f979c", "#2b3136"]],
@@ -52,9 +60,12 @@ export function HomeStage() {
             <Link href="/demo">Edit profile <span aria-hidden="true">→</span></Link>
             <p className="section-label">Interests</p>
             <ul className="thumb-list">
-              <li><Shot motif={0} colors={PALETTES[shownCity][0]} /><span>Radiohead<br />Music</span></li>
-              <li><Shot motif={1} colors={PALETTES[shownCity][1]} /><span>Spirited Away<br />Movie</span></li>
-              <li><Shot motif={2} colors={PALETTES[shownCity][2]} /><span>Dune<br />Book</span></li>
+              {INTERESTS.map((interest) => (
+                <li key={interest.name}>
+                  <Cover name={interest.name} kind={interest.kind} />
+                  <span>{interest.name}<br />{interest.label}</span>
+                </li>
+              ))}
             </ul>
             <p className="section-label">Question</p>
             <p className="question-line">{places ? "Three places for an evening out." : "Three books for a quiet week."}</p>
@@ -66,6 +77,7 @@ export function HomeStage() {
               title="Original assistant"
               copy="A general recommendation based on the original prompt."
               colors={PALETTES[shownCity]}
+              photos={places ? undefined : INTERESTS}
               open={open === "original"}
               onToggle={() => setOpen(open === "original" ? null : "original")}
               evidence={open === "original-evidence"}
@@ -77,6 +89,7 @@ export function HomeStage() {
               title="Qloo-assisted revision"
               copy="A more culturally grounded result using Qloo evidence."
               colors={[PALETTES[shownCity][2], PALETTES[shownCity][0], PALETTES[shownCity][1]]}
+              photos={places ? undefined : INTERESTS}
               open={open === "revised"}
               onToggle={() => setOpen(open === "revised" ? null : "revised")}
               evidence={open === "revised-evidence"}
@@ -85,7 +98,7 @@ export function HomeStage() {
             />
           </div>
         </div>
-        <p className="muted">Illustrative candidates. Not a measured result. No brand affiliation.</p>
+        <p className="muted">Illustrative candidates. Pictures are the first catalog image for that name. Not a measured result. No brand affiliation.</p>
       </section>
     </Frame>
   );
@@ -96,6 +109,7 @@ function PreviewRow({
   title,
   copy,
   colors,
+  photos,
   open,
   onToggle,
   evidence,
@@ -106,6 +120,7 @@ function PreviewRow({
   title: string;
   copy: string;
   colors: string[][];
+  photos?: Array<{ name: string; kind: ArtworkKind }>;
   open: boolean;
   onToggle: () => void;
   evidence: boolean;
@@ -123,7 +138,12 @@ function PreviewRow({
         <p className="illus-label">Illustrative candidates</p>
       </div>
       <div className="shot-row">
-        {colors.map((palette, item) => <Shot key={item} motif={item} colors={palette} />)}
+        {photos ? photos.map((photo) => (
+          <span className="shot shot-photo" key={photo.name}>
+            <Cover name={photo.name} kind={photo.kind} fill />
+            <span className="shot-caption">{photo.name}</span>
+          </span>
+        )) : colors.map((palette, item) => <Shot key={item} motif={item} colors={palette} />)}
       </div>
       <div className="text-actions">
         <button type="button" onClick={onToggle}>→ Read answer</button>

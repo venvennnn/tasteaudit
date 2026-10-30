@@ -2,7 +2,9 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Cover } from "@/components/Cover";
 import { useSession } from "@/components/SessionProvider";
+import type { ArtworkKind } from "@/lib/catalog/rank";
 import { AffinityChart, CoverageChart } from "@/components/Charts";
 import { affinityDelta, formatAffinity, formatRatio, formatSigned, meanObserved } from "@/lib/audit/metrics";
 import { ageBandLabel, ageToSupportedBand } from "@/lib/audit/age";
@@ -34,6 +36,7 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
   return (
     <div className="stack" data-testid="results-ready">
       {state.source === "imported" ? <p className="memory" data-testid="imported-label">Imported. Scores in this file are imported evidence, not a new provider verification.</p> : null}
+      <p className="muted">Recommendation pictures are the first catalog image for that name. A picture is not an affinity score.</p>
       <div className="segment" aria-label="Result views">
         <span className="on">Original vs revised</span>
         {!state.compareAll && state.assistantMode === "simulate" ? <button type="button" data-testid="compare-all" onClick={() => void compare()}>All four approaches</button> : <span className={state.compareAll ? "on" : undefined}>All four approaches</span>}
@@ -151,7 +154,9 @@ function SeedList({ onCorrect }: { onCorrect: (query: string, entityId: string) 
 
 function CaseView({ item, compareAll, vote, onVote, onRecord, canRecord }: { item: CaseRecord; compareAll: boolean; vote?: { choice: "a" | "b" | null; revealed: boolean }; onVote: (vote: { choice: "a" | "b"; revealed: boolean }) => void; onRecord: () => void; canRecord: boolean }) {
   const [open, setOpen] = useState<string | null>(null);
-  const band = ageToSupportedBand(parseAge(useSession().state.profile.age));
+  const session = useSession();
+  const artKind: ArtworkKind = session.state.domain === "book" ? "book" : "any";
+  const band = ageToSupportedBand(parseAge(session.state.profile.age));
   const openScore = open ? scoreFor(item, open) ?? item.scores.find((row) => row.name === open) : undefined;
   return (
     <section className="stack" data-testid={`case-${item.city}`}>
@@ -172,7 +177,7 @@ function CaseView({ item, compareAll, vote, onVote, onRecord, canRecord }: { ite
           <div className="tile-grid">
             {item.extracted.map((pick) => (
               <button type="button" className="tile" key={pick.name} onClick={() => setOpen(pick.entityId ?? pick.name)}>
-                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true" />
+                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true"><Cover name={pick.name} kind={artKind} fill /></span>
                 <strong>{pick.name}</strong>
                 <small>{pick.matchStatus}</small>
                 <small>Affinity {formatAffinity(scoreFor(item, pick.entityId)?.affinity ?? null)}</small>
@@ -192,7 +197,7 @@ function CaseView({ item, compareAll, vote, onVote, onRecord, canRecord }: { ite
           <div className="tile-grid">
             {item.revisedSelections.map((pick) => (
               <button type="button" className="tile" key={pick.id} data-testid="evidence-open" onClick={() => setOpen(pick.id)}>
-                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true" />
+                <span className="tile-art" style={{ background: artBackground(pick.name) }} aria-hidden="true"><Cover name={pick.name} kind={artKind} fill /></span>
                 <strong>{pick.name}</strong>
                 <small>Candidate from the allowlist</small>
                 <small>Affinity {formatAffinity(scoreFor(item, pick.id)?.affinity ?? null)}</small>

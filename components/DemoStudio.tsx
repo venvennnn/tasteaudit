@@ -7,6 +7,7 @@ import { Journey } from "@/components/Journey";
 import { ModeSwitch } from "@/components/ModeSwitch";
 import { StartRail, WhoRail } from "@/components/Rails";
 import { hasRunActivity, RunProgress } from "@/components/RunProgress";
+import { ArtworkSearch, Cover } from "@/components/Cover";
 import { BellIcon, BookIcon } from "@/components/icons";
 import { ResultsBody } from "@/components/ResultsStudio";
 import { estimateProviderCalls } from "@/lib/audit/estimate";
@@ -29,7 +30,6 @@ export function DemoStudio() {
   const [extraCity, setExtraCity] = useState("");
   const [formError, setFormError] = useState<string | null>(null);
   const [kindTab, setKindTab] = useState<Favorite["kind"]>("movie");
-  const [search, setSearch] = useState("");
   const cities = activeCities(state);
   const taskPreview = useMemo(() => buildTask(state, cities[0] ?? "", state.seeds), [state, cities]);
   const estimate = estimateProviderCalls({
@@ -54,15 +54,14 @@ export function DemoStudio() {
     update({ profile: { ...state.profile, favorites } });
   }
 
-  function applySearch() {
-    const query = search.trim();
+  function pickInterest(name: string) {
+    const query = name.trim();
     if (!query) return;
     const match = state.profile.favorites.findIndex((favorite) => favorite.kind === kindTab);
     const empty = state.profile.favorites.findIndex((favorite) => !favorite.name.trim());
     const index = match >= 0 ? match : empty;
     if (index < 0) return;
     editFavorite(index, { name: query, kind: kindTab });
-    setSearch("");
   }
 
   async function start() {
@@ -136,12 +135,11 @@ export function DemoStudio() {
                     <button key={tab.id} type="button" aria-pressed={kindTab === tab.id} onClick={() => setKindTab(tab.id)}>{tab.label}</button>
                   ))}
                 </div>
-                <form className="search-line" onSubmit={(event) => { event.preventDefault(); applySearch(); }}>
-                  <input aria-label="Search an interest" placeholder="Search a movie, artist or book..." value={search} onChange={(event) => setSearch(event.target.value)} />
-                </form>
+                <ArtworkSearch kind={kindTab} onPick={pickInterest} />
                 <div className="interest-list">
                   {state.profile.favorites.map((favorite, index) => (
                     <div className="interest-chip" key={index}>
+                      {favorite.name.trim() ? <Cover name={favorite.name} kind={favorite.kind} /> : null}
                       <select className="chip-kind" aria-label={`Kind ${index + 1}`} value={favorite.kind} onChange={(event) => editFavorite(index, { kind: event.target.value as Favorite["kind"] })}>
                         <option value="movie">Movie</option>
                         <option value="artist">Artist</option>
@@ -153,6 +151,7 @@ export function DemoStudio() {
                     </div>
                   ))}
                 </div>
+                <p className="muted">Pictures come from Wikipedia, Open Library, or Deezer. They are the first matching catalog image, not a score.</p>
               </div>
             </section>
             <section className="brief-block">
