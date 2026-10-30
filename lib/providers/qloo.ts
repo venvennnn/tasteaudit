@@ -1,6 +1,6 @@
 import { AppError } from "@/lib/providers/errors";
 import { fetchWithRetry, timeoutSignal } from "@/lib/providers/retry";
-import { domainFilterType, ENTITY_ID_PATTERN, LIMITS, type Domain } from "@/lib/schemas/limits";
+import { domainFilterType, ENTITY_ID_PATTERN, LIMITS, QLOO_HACKATHON_ORIGIN, type Domain } from "@/lib/schemas/limits";
 
 export type Contribution = {
   entityId: string | null;
@@ -42,47 +42,31 @@ export type QlooCall = {
 };
 
 function configuredBase(): URL {
+  const fallback = new URL(QLOO_HACKATHON_ORIGIN);
   const raw = process.env.QLOO_BASE_URL?.trim();
-  if (!raw) {
-    throw new AppError({
-      code: "not_configured",
-      message: "QLOO_BASE_URL is not configured.",
-      stage: "qloo",
-      retryable: false,
-      status: 503,
-    });
-  }
+  if (!raw) return fallback;
   let url: URL;
   try {
     url = new URL(raw);
   } catch {
     throw new AppError({
       code: "not_configured",
-      message: "QLOO_BASE_URL is not a valid URL.",
+      message: "QLOO_BASE_URL is not a valid URL. Use https://hackathon.api.qloo.com.",
       stage: "qloo",
       retryable: false,
       status: 503,
     });
   }
-  if (url.protocol !== "https:") {
+  if (url.origin !== fallback.origin || (url.pathname !== "/" && url.pathname !== "")) {
     throw new AppError({
       code: "not_configured",
-      message: "QLOO_BASE_URL must use HTTPS.",
+      message: "QLOO_BASE_URL must be https://hackathon.api.qloo.com. This hackathon key does not work on other hosts.",
       stage: "qloo",
       retryable: false,
       status: 503,
     });
   }
-  if (url.pathname !== "/" && url.pathname !== "") {
-    throw new AppError({
-      code: "not_configured",
-      message: "QLOO_BASE_URL must be the host origin, without a path. TasteAudit does not switch hosts.",
-      stage: "qloo",
-      retryable: false,
-      status: 503,
-    });
-  }
-  return url;
+  return fallback;
 }
 
 function apiKey(): string {
@@ -90,7 +74,7 @@ function apiKey(): string {
   if (!key) {
     throw new AppError({
       code: "not_configured",
-      message: "QLOO_API_KEY is not configured.",
+      message: "QLOO_API_KEY is not configured. Add the key from the hackathon email as a server environment variable and redeploy. Requests go only to https://hackathon.api.qloo.com.",
       stage: "qloo",
       retryable: false,
       status: 503,

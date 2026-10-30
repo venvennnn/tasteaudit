@@ -24,9 +24,9 @@ Fill the server variables in `.env.local`. None of them use a `NEXT_PUBLIC_` pre
 | Variable | Purpose |
 | --- | --- |
 | `QLOO_API_KEY` | Sent only as the `X-Api-Key` header |
-| `QLOO_BASE_URL` | Host origin for the key you were issued, with no path. Hackathon keys use `https://hackathon.api.qloo.com` and do not work on `https://api.qloo.com`. The app does not switch hosts. |
-| `GEMINI_API_KEY` | Google Gemini API key |
-| `GEMINI_MODEL` | A model this key can call that supports structured JSON output. `gemini-2.5-flash` is a documented structured-output model. The server uses this value for every arm and does not substitute another model. |
+| `QLOO_BASE_URL` | Optional. Unset uses `https://hackathon.api.qloo.com`. Any other host is rejected. The hackathon key does not work on `https://api.qloo.com`. |
+| `GEMINI_API_KEY` | Google Gemini API key. This is separate from the Qloo hackathon email. |
+| `GEMINI_MODEL` | Optional. Unset uses `gemini-3.8-flash`. The server uses one model for every arm. Gemini 3.8 does not accept temperature or top-p, so those parameters are not sent. |
 | `EVIDENCE_SIGNING_SECRET` | Optional. At least 16 characters. Scoring then returns a short-lived HMAC envelope, and the revision includes numeric affinity only when that envelope verifies. |
 | `TASTEAUDIT_MAX_CITIES` | Optional cap, at most 3 |
 | `TASTEAUDIT_INSTANCE_RPM` | Optional per-isolate request cap. This resets with the process and is not a durable global rate limit. |
@@ -58,7 +58,11 @@ npm run test:browser
 
 1. Push this repository to GitHub.
 2. In Vercel, import the repository, choose Next.js, and use this directory as the project root.
-3. Add the production and preview environment variables deliberately. Preview credentials should have a low provider spend limit. Do not mark any of these variables as exposed to the browser.
+3. In the Vercel project, open Settings, then Environment Variables. Add the same names for Production and Preview. Do not mark them as exposed to the browser, and do not prefix them with `NEXT_PUBLIC_`. Then redeploy so the new values are picked up.
+   - `QLOO_API_KEY`: the key from the Qloo hackathon email
+   - `QLOO_BASE_URL`: `https://hackathon.api.qloo.com`
+   - `GEMINI_API_KEY`: a Google AI Studio key
+   - `GEMINI_MODEL`: `gemini-3.8-flash`
 4. Each provider route sets `maxDuration = 60` and `runtime = "nodejs"`. Confirm the project’s plan allows that duration. Qloo calls time out after `QLOO_TIMEOUT_MS` and Gemini calls after `GEMINI_TIMEOUT_MS`, with at most two attempts, so a route returns inside the platform limit. Vercel Pro does not include Qloo or Gemini charges.
 5. Deploy a preview, click through the demo and the company flow, then promote that commit.
 6. Add a custom domain if you want one, and confirm HTTPS.

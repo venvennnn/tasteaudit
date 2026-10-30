@@ -54,6 +54,10 @@ export const QLOO_TYPES = {
 
 export const SYSTEM_PROMPT_VERSION = "tasteaudit-prompts-2026-10-30";
 
+export const QLOO_HACKATHON_ORIGIN = "https://hackathon.api.qloo.com";
+
+export const DEFAULT_GEMINI_MODEL = "gemini-3.8-flash";
+
 export const FROZEN_GENERATION = {
   temperature: 0.4,
   topP: 0.9,

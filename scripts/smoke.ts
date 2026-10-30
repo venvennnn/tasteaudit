@@ -7,11 +7,11 @@ function configured(name: string): string | null {
 
 async function main() {
   const qlooKey = configured("QLOO_API_KEY");
-  const qlooBase = configured("QLOO_BASE_URL");
+  const qlooBase = configured("QLOO_BASE_URL") ?? "https://hackathon.api.qloo.com";
   const geminiKey = configured("GEMINI_API_KEY");
-  const model = configured("GEMINI_MODEL");
-  if (!qlooKey || !qlooBase || !geminiKey || !model) {
-    console.log("Live provider checks skipped: QLOO_API_KEY, QLOO_BASE_URL, GEMINI_API_KEY, or GEMINI_MODEL is not set.");
+  const model = configured("GEMINI_MODEL") ?? "gemini-3.8-flash";
+  if (!qlooKey || !geminiKey) {
+    console.log("Live provider checks skipped: QLOO_API_KEY or GEMINI_API_KEY is not set.");
     if (process.env.SMOKE_REQUIRED === "1") process.exit(2);
     return;
   }

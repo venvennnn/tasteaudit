@@ -62,6 +62,26 @@ afterEach(() => {
 });
 
 describe("provider routes", () => {
+  it("rejects a Qloo host other than the hackathon server", async () => {
+    process.env.QLOO_BASE_URL = "https://api.qloo.com";
+    const response = await search(call("/api/qloo/search", { name: "Dune", expectedTypes: ["urn:entity:book"] }));
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({ code: "not_configured" });
+  });
+
+  it("calls the hackathon host when QLOO_BASE_URL is unset", async () => {
+    delete process.env.QLOO_BASE_URL;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string) => {
+        expect(new URL(url).origin).toBe("https://hackathon.api.qloo.com");
+        return new Response(JSON.stringify({ results: [] }), { status: 200 });
+      }),
+    );
+    const response = await search(call("/api/qloo/search", { name: "Dune", expectedTypes: ["urn:entity:book"] }));
+    expect(response.status).toBe(200);
+  });
+
   it("returns no-store and does not echo secrets", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ results: [] }), { status: 200 })));
     const response = await search(call("/api/qloo/search", { name: "Dune", expectedTypes: ["urn:entity:book"] }));

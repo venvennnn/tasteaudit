@@ -269,7 +269,7 @@ function Methods({ item, ageLabel }: { item: CaseRecord; ageLabel: string | null
   return (
     <details className="card">
       <summary>Methods for this case</summary>
-      <p>Model: {item.observedModel ?? "Unknown for a pasted answer"}. Temperature {item.originalProvenance?.temperature ?? "frozen on the server"}. Prompt {item.originalProvenance?.systemPromptVersion ?? "server prompt"}.</p>
+      <p>Model: {item.observedModel ?? "Unknown for a pasted answer"}. {item.originalProvenance?.temperature != null ? `Temperature ${item.originalProvenance.temperature}, top-p ${item.originalProvenance.topP}.` : "Temperature and top-p were not sent. Gemini 3.8 does not accept them."} Prompt {item.originalProvenance?.systemPromptVersion ?? "server prompt"}.</p>
       {ageLabel ? <p>Explicit age was mapped to the documented band {ageLabel} and that band was eligible to send.</p> : <p>No age band was sent.</p>}
       <ul>{item.signals?.qloo.map((signal) => <li key={signal.name}>{signal.name}: {signal.value}</li>)}</ul>
       <ul>{item.signals?.withheld.map((signal) => <li key={signal.name}>{signal.name}: {signal.reason}</li>)}</ul>
