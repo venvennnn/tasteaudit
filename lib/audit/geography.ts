@@ -1,10 +1,11 @@
 import type { Domain } from "@/lib/schemas/limits";
 
-export function geographyNote(domain: Domain, geographicSignalApplied: boolean): string {
-  if (domain === "book" || !geographicSignalApplied) {
-    return "Interest-based affinity; city not applied to Qloo scoring.";
-  }
-  return "Nearby venue filter for the requested area. This is not a measure of local residents’ cultural preferences. Original and revised places were scored with the same location filter.";
+export const INTEREST_AFFINITY_NOTE =
+  "Affinity reflects explicit interests. Location was not applied to Qloo scoring.";
+
+export function geographyNote(_domain: Domain, locationFilterApplied: boolean): string {
+  if (!locationFilterApplied) return INTEREST_AFFINITY_NOTE;
+  return `${INTEREST_AFFINITY_NOTE} filter.location.query was sent as a locality candidate filter. It limits which venues are returned. It does not measure local market preferences.`;
 }
 
 export function geographyApplied(domain: Domain, geographicSignalApplied: boolean): boolean {

@@ -92,6 +92,13 @@ export type SelectionDiagnostic = {
   geographyNote: string;
   summary: string;
   diff: SelectionDiff;
+  revisedAffinities?: { entityId: string; affinity: number | null }[];
+  unroundedOriginalMean?: number | null;
+  unroundedRevisedMean?: number | null;
+  requestKey?: string;
+  discoverParameters?: { name: string; value: string }[];
+  scoreParameters?: { name: string; value: string }[];
+  locationAccounting?: { gemini: string; candidateFilter: string; scoringSignal: string };
 };
 
 export type SignalSnapshot = {

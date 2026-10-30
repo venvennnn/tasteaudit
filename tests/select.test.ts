@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { affinityDelta, meanObserved } from "@/lib/audit/metrics";
 import { geographyNote } from "@/lib/audit/geography";
 import { selectRevised, type Selectable } from "@/lib/audit/select";
+import { insightsParameters } from "@/lib/providers/qloo";
 import { DEMO_BOOK_CITIES, DEMO_PLACE_CITIES } from "@/lib/session/presets";
 
 const a = "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa";
@@ -83,10 +84,21 @@ describe("selection policy", () => {
       candidates: [row({ entityId: a, name: "Dune", affinity: null, sources: ["original"] })],
     });
     expect(result.diff.summary).toBe("Insufficient evidence to compare.");
-    expect(geographyNote("book", false)).toBe("Interest-based affinity; city not applied to Qloo scoring.");
-    expect(geographyNote("place", true)).toMatch(/Nearby venue filter/);
+    expect(geographyNote("book", false)).toBe("Affinity reflects explicit interests. Location was not applied to Qloo scoring.");
+    expect(geographyNote("place", true)).toMatch(/locality candidate filter/);
+    expect(geographyNote("place", true)).toMatch(/does not measure local market preferences/);
     expect(DEMO_PLACE_CITIES).toHaveLength(4);
     expect(DEMO_BOOK_CITIES).toHaveLength(4);
+    const books = insightsParameters({ domain: "book", seedIds: [a], locationQuery: "Chicago", take: 30 });
+    const lisbon = insightsParameters({ domain: "place", seedIds: [a], candidateIds: [b], locationQuery: "Lisbon", take: 2 });
+    const osaka = insightsParameters({ domain: "place", seedIds: [a], candidateIds: [b], locationQuery: "Osaka", take: 2 });
+    expect(books.parameters["filter.location.query"]).toBeUndefined();
+    expect(books.parameters["signal.location.query"]).toBeUndefined();
+    expect(books.locationFilterApplied).toBe(false);
+    expect(lisbon.parameters["filter.location.query"]).toBe("Lisbon");
+    expect(osaka.parameters["filter.location.query"]).toBe("Osaka");
+    expect(lisbon.parameters["signal.location"]).toBeUndefined();
+    expect(lisbon.parameters["signal.location.query"]).toBeUndefined();
   });
 
   it("excludes a verified conflict without inventing a replacement", () => {

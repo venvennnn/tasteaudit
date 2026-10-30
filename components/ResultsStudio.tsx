@@ -80,6 +80,7 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
         </table>
         <CityDots rows={ordered.map((item) => ({ city: item.city, ...cityOutcome(item) }))} />
         <p className="results-note">Both affinity numbers come from Qloo. Gemini does not produce a separate affinity score. The dots compare the two arms inside a city. They are not a ranking of cities, and they are not proof of customer satisfaction.</p>
+      <SameRequestNote cases={ordered} />
       </section>
       <CityCompare cases={ordered} domain={state.domain} />
       {rest.length >= 0 && state.assistantMode === "simulate" && !state.compareAll ? (
@@ -170,6 +171,18 @@ function diffFor(item: CaseRecord): SelectionDiff {
     newCandidateCount: item.discovered.length,
     comparable: item.scores.some((row) => row.affinity !== null),
   });
+}
+
+function formatFull(value: number | null | undefined): string {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "—";
+  return String(value);
+}
+
+function SameRequestNote({ cases }: { cases: CaseRecord[] }) {
+  const keys = cases.map((item) => item.diagnostic?.requestKey).filter((key): key is string => Boolean(key));
+  if (keys.length < 2 || keys.length !== cases.length) return null;
+  if (new Set(keys).size !== 1) return null;
+  return <p className="results-note">These cities sent the same Qloo scoring request. A matching revised affinity is the same measurement. It does not measure local market preferences.</p>;
 }
 
 function geographyCopy(item: CaseRecord, domain: "book" | "place"): string {
@@ -270,6 +283,13 @@ function CityCompare({ cases, domain }: { cases: CaseRecord[]; domain: "book" | 
         <p>Eligible ids: {item.diagnostic?.eligibleIds.join(", ") || "none"}.</p>
         <p>Selected ids: {item.diagnostic?.selectedIds.join(", ") || "none"}.</p>
         <p>New candidates {item.diagnostic?.newCandidateCount ?? "—"}. Retained {diff.retainedCount}. Replaced {diff.replacementCount}.</p>
+        <p>Unrounded original mean {formatFull(item.diagnostic?.unroundedOriginalMean ?? cityOutcome(item).original.value)}. Unrounded revised mean {formatFull(item.diagnostic?.unroundedRevisedMean ?? cityOutcome(item).revised.value)}.</p>
+        <ul>{(item.diagnostic?.revisedAffinities ?? item.revisedSelections.map((pick) => ({ entityId: pick.id, affinity: scoreFor(item, pick.id)?.affinity ?? null }))).map((row) => <li key={row.entityId}>{row.entityId}: {formatFull(row.affinity)}</li>)}</ul>
+        <p>{item.diagnostic?.locationAccounting?.gemini}</p>
+        <p>{item.diagnostic?.locationAccounting?.candidateFilter}</p>
+        <p>{item.diagnostic?.locationAccounting?.scoringSignal}</p>
+        <p>Scoring request key {item.diagnostic?.requestKey ?? "unavailable"}.</p>
+        <ul>{(item.diagnostic?.scoreParameters ?? []).map((row) => <li key={row.name}>{row.name}: {row.value}</li>)}</ul>
         <ul>{(item.diagnostic?.scoringSignals ?? item.signals?.qloo ?? []).map((signal) => <li key={signal.name}>{signal.name}: {signal.value}</li>)}</ul>
         <p>Candidate pool</p>
         <ul>{item.scores.map((row) => <li key={row.entityId}>{row.name} · {row.entityId} · {formatAffinity3(row.affinity)} · {row.sources.join(", ") || "unspecified"}</li>)}</ul>

@@ -342,6 +342,38 @@ export async function searchEntities(input: {
   return { entities, warnings: result.warnings, call: result.call, empty: entities.length === 0 };
 }
 
+export function insightsParameters(input: {
+  domain: Domain;
+  seedIds: string[];
+  candidateIds?: string[];
+  locationQuery?: string;
+  ageBand?: string;
+  take: number;
+}): { parameters: Record<string, string>; locationFilterApplied: boolean } {
+  const parameters: Record<string, string> = {
+    "filter.type": domainFilterType(input.domain),
+    "signal.interests.entities": input.seedIds.join(","),
+    "feature.explainability": "true",
+    take: String(input.take),
+  };
+  if (input.candidateIds && input.candidateIds.length > 0) {
+    parameters["filter.results.entities"] = input.candidateIds.join(",");
+  }
+  let locationFilterApplied = false;
+  // filter.location.query is a locality candidate filter. The parameter dictionary
+  // lists it for Destination and Place. The place entity-type table lists
+  // filter.location and omits this query form. Books are not in either list.
+  // signal.location and signal.location.query are not added: the book and place
+  // entity-type tables omit them, even though the parameter dictionary marks them
+  // compatible with both types.
+  if (input.domain === "place" && input.locationQuery) {
+    parameters["filter.location.query"] = input.locationQuery;
+    locationFilterApplied = true;
+  }
+  if (input.ageBand) parameters["signal.demographics.age"] = input.ageBand;
+  return { parameters, locationFilterApplied };
+}
+
 export async function discoverCandidates(input: {
   domain: Domain;
   seedIds: string[];
@@ -355,18 +387,14 @@ export async function discoverCandidates(input: {
   locality: LocalityResolution | null;
   geographicSignalApplied: boolean;
 }> {
-  const parameters: Record<string, string> = {
-    "filter.type": domainFilterType(input.domain),
-    "signal.interests.entities": input.seedIds.join(","),
-    "feature.explainability": "true",
-    take: String(LIMITS.discoverTake),
-  };
-  let geographicSignalApplied = false;
-  if (input.domain === "place" && input.locationQuery) {
-    parameters["filter.location.query"] = input.locationQuery;
-    geographicSignalApplied = true;
-  }
-  if (input.ageBand) parameters["signal.demographics.age"] = input.ageBand;
+  const { parameters, locationFilterApplied } = insightsParameters({
+    domain: input.domain,
+    seedIds: input.seedIds,
+    locationQuery: input.locationQuery,
+    ageBand: input.ageBand,
+    take: LIMITS.discoverTake,
+  });
+  const geographicSignalApplied = locationFilterApplied;
   const result = await qlooGet("/v2/insights", parameters, "qloo.discover", input.signal);
   const locality = parseLocality(result.payload);
   return {
@@ -395,19 +423,15 @@ export async function scoreCandidates(input: {
   geographicSignalApplied: boolean;
   missingIds: string[];
 }> {
-  const parameters: Record<string, string> = {
-    "filter.type": domainFilterType(input.domain),
-    "signal.interests.entities": input.seedIds.join(","),
-    "filter.results.entities": input.candidateIds.join(","),
-    "feature.explainability": "true",
-    take: String(Math.min(50, input.candidateIds.length)),
-  };
-  let geographicSignalApplied = false;
-  if (input.domain === "place" && input.locationQuery) {
-    parameters["filter.location.query"] = input.locationQuery;
-    geographicSignalApplied = true;
-  }
-  if (input.ageBand) parameters["signal.demographics.age"] = input.ageBand;
+  const { parameters, locationFilterApplied } = insightsParameters({
+    domain: input.domain,
+    seedIds: input.seedIds,
+    candidateIds: input.candidateIds,
+    locationQuery: input.locationQuery,
+    ageBand: input.ageBand,
+    take: Math.min(50, input.candidateIds.length),
+  });
+  const geographicSignalApplied = locationFilterApplied;
   const result = await qlooGet("/v2/insights", parameters, "qloo.score", input.signal);
   const entities = entityArray(result.payload)
     .map(normalizeEntity)

@@ -12,7 +12,7 @@ export function POST(request: Request) {
     const result = await discoverCandidates({ ...input, signal: ctx.signal });
     const warnings = [...result.warnings];
     if (input.domain === "book") {
-      warnings.push("Book discovery did not send a city filter. Qloo scores for books are not city-conditioned.");
+      warnings.push("Affinity reflects explicit interests. Location was not applied to Qloo scoring.");
     }
     if (input.domain === "place" && input.locationQuery && !result.locality) {
       warnings.push("No locality resolution was returned for this city filter.");
