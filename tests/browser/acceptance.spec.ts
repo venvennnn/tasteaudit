@@ -73,8 +73,8 @@ test.describe("acceptance", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /Change the context/ })).toBeVisible();
-    await expect(page.locator(".rail-word").first()).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Does it know the customer/ })).toBeVisible();
+    await expect(page.getByRole("link", { name: "TasteAudit" }).first()).toBeVisible();
     await page.getByTestId("cta-demo").click();
     await page.getByTestId("preset-concierge").click();
     await page.getByTestId("demo-continue").click();

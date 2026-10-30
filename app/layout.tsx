@@ -1,15 +1,14 @@
 import type { Metadata } from "next";
-import localFont from "next/font/local";
 import { RunBar } from "@/components/RunBar";
 import { SessionProvider } from "@/components/SessionProvider";
+import "@fontsource-variable/geist/wght.css";
+import "@fontsource/space-grotesk/latin-400.css";
+import "@fontsource/space-grotesk/latin-500.css";
+import "@fontsource/space-grotesk/latin-600.css";
+import "@fontsource/space-grotesk/latin-700.css";
+import "@fontsource/jetbrains-mono/latin-400.css";
+import "@fontsource/jetbrains-mono/latin-500.css";
 import "./globals.css";
-
-const manrope = localFont({
-  src: "./fonts/manrope-latin-wght-normal.woff2",
-  weight: "200 800",
-  style: "normal",
-  display: "swap",
-});
 
 export const metadata: Metadata = {
   title: "TasteAudit",
@@ -19,7 +18,7 @@ export const metadata: Metadata = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en">
-      <body className={manrope.className}>
+      <body>
         <SessionProvider>
           <a className="skip" href="#content">Skip to content</a>
           <RunBar />
