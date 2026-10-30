@@ -35,6 +35,10 @@ export type StageState = {
 
 export type Favorite = { name: string; kind: FavoriteKind };
 
+export type ReaderProfile = { label: string; favorites: Favorite[] };
+
+export type Comparison = "cities" | "readers";
+
 export type ResolvedSeed = {
   query: string;
   kind: FavoriteKind;
@@ -173,6 +177,8 @@ export type SessionState = {
     favorites: Favorite[];
   };
   cities: string[];
+  comparison: Comparison;
+  readers: ReaderProfile[];
   taskQuestion: string;
   recommendationCount: number;
   compareAll: boolean;
@@ -198,6 +204,8 @@ export type ConfigPatch = Partial<
     | "pastedAnswer"
     | "profile"
     | "cities"
+    | "comparison"
+    | "readers"
     | "taskQuestion"
     | "recommendationCount"
     | "seedOverrides"
@@ -262,12 +270,16 @@ export function hashInput(state: Pick<
   | "pastedAnswer"
   | "profile"
   | "cities"
+  | "comparison"
+  | "readers"
   | "taskQuestion"
   | "recommendationCount"
   | "seedOverrides"
   | "simulatedLabel"
 >): unknown {
   return {
+    comparison: state.comparison,
+    readers: state.readers,
     assistantMode: state.assistantMode,
     company: state.company,
     domain: state.domain,
@@ -317,6 +329,8 @@ export function createSession(): SessionState {
       ],
     },
     cities: [""],
+    comparison: "cities",
+    readers: [],
     taskQuestion: "Recommend three places for my evening in this city, considering my interests, budget and practical needs.",
     recommendationCount: LIMITS.recommendationsDefault,
     compareAll: false,

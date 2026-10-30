@@ -1,3 +1,4 @@
+import { INTEREST_AFFINITY_NOTE } from "@/lib/audit/geography";
 import { handleRoute } from "@/lib/http/route";
 import { discoverCandidates } from "@/lib/providers/qloo";
 import { discoverRequestSchema } from "@/lib/schemas/api";
@@ -12,7 +13,7 @@ export function POST(request: Request) {
     const result = await discoverCandidates({ ...input, signal: ctx.signal });
     const warnings = [...result.warnings];
     if (input.domain === "book") {
-      warnings.push("Affinity reflects explicit interests. Location was not applied to Qloo scoring.");
+      warnings.push(INTEREST_AFFINITY_NOTE);
     }
     if (input.domain === "place" && input.locationQuery && !result.locality) {
       warnings.push("No locality resolution was returned for this city filter.");

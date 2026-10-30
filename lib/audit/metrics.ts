@@ -93,7 +93,7 @@ export function formatSigned(value: number | null): string {
 }
 
 export function formatAffinity3(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "—";
+  if (value === null || !Number.isFinite(value)) return "Unavailable";
   return value.toFixed(3);
 }
 

@@ -4,12 +4,11 @@ import Link from "next/link";
 import { Frame } from "@/components/Frame";
 import { ResultsBody } from "@/components/ResultsStudio";
 import { useSession } from "@/components/SessionProvider";
-import { demoCitiesFor } from "@/lib/session/presets";
-import { activeCities } from "@/lib/session/state";
+import { runLabels } from "@/lib/session/presets";
 
 export default function ResultsPage() {
   const { state, run } = useSession();
-  const cities = state.scenario === "demo" ? demoCitiesFor(state.domain) : activeCities(state);
+  const cities = runLabels(state);
   const brief = state.scenario === "company" ? "/audit" : "/demo";
   return (
     <Frame>

@@ -109,7 +109,7 @@ export function recommendationsCsv(state: SessionState): string {
         row.rank,
         row.entityId,
         row.name,
-        row.affinity === null ? "" : formatAffinity3(row.affinity),
+        row.affinity === null ? "Unavailable" : formatAffinity3(row.affinity),
         row.identity,
         row.membership,
         row.rankChanged ? "true" : "false",
@@ -190,6 +190,8 @@ export function importDocument(raw: unknown): { ok: true; state: SessionState } 
     schemaVersion: SCHEMA_VERSION,
     source: "imported",
     running: false,
+    comparison: session.comparison === "readers" ? "readers" : "cities",
+    readers: Array.isArray(session.readers) ? session.readers : [],
     cases,
     runId: crypto.randomUUID(),
   });

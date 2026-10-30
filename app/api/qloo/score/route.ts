@@ -1,3 +1,4 @@
+import { INTEREST_AFFINITY_NOTE } from "@/lib/audit/geography";
 import { handleRoute } from "@/lib/http/route";
 import { scoreCandidates } from "@/lib/providers/qloo";
 import { scoreRequestSchema } from "@/lib/schemas/api";
@@ -35,7 +36,7 @@ export function POST(request: Request) {
       }));
     const warnings = [...result.warnings];
     if (!signing) warnings.push("Evidence signing is not configured. Numeric scores from this response are not signed.");
-    if (input.domain === "book") warnings.push("Affinity reflects explicit interests. Location was not applied to Qloo scoring.");
+    if (input.domain === "book") warnings.push(INTEREST_AFFINITY_NOTE);
     return {
       data: {
         entities,
