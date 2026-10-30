@@ -8,7 +8,7 @@ import { Journey } from "@/components/Journey";
 import { useSession } from "@/components/SessionProvider";
 import { estimateProviderCalls } from "@/lib/audit/estimate";
 import { buildTask } from "@/lib/audit/orchestrate";
-import { FROZEN_GENERATION, LIMITS, SYSTEM_PROMPT_VERSION } from "@/lib/schemas/limits";
+import { DEFAULT_GEMINI_MODEL, FROZEN_GENERATION, LIMITS, SYSTEM_PROMPT_VERSION } from "@/lib/schemas/limits";
 import { activeCities, type Favorite } from "@/lib/session/state";
 
 const STEPS = ["Company", "Customer", "Task", "Review"] as const;
@@ -234,7 +234,7 @@ function ReviewStep({ estimate, lines }: { estimate: number; lines: { label: str
     <div>
       <h2>Authoritative specification</h2>
       {"error" in task ? <p className="error">{task.error}</p> : <pre className="answer">{JSON.stringify(task, null, 2)}</pre>}
-      <p>Selected model: the server reads GEMINI_MODEL at call time, then keeps that identifier for the run. Temperature {FROZEN_GENERATION.temperature}, top-p {FROZEN_GENERATION.topP}, prompt {SYSTEM_PROMPT_VERSION}.</p>
+      <p>Selected model: the server reads GEMINI_MODEL at call time, or uses {DEFAULT_GEMINI_MODEL} when that variable is unset, then keeps that identifier for the run. Gemini 3.8 does not accept temperature or top-p. Older models still use temperature {FROZEN_GENERATION.temperature} and top-p {FROZEN_GENERATION.topP}. Prompt {SYSTEM_PROMPT_VERSION}. Qloo calls go only to https://hackathon.api.qloo.com.</p>
       <p>Arms: original{state.assistantMode === "paste" ? " (pasted, model unknown)" : " Gemini"}{state.compareAll ? ", self-refinement, Qloo rerank" : ""}, Qloo revision. Turn on “Compare all approaches” from results after the first case if you want the extra baselines.</p>
       <p>Estimated provider calls for the first city: {estimate}.</p>
       <ul>{lines.map((line) => <li key={line.label}>{line.label}: {line.count}</li>)}</ul>

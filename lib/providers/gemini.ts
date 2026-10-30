@@ -1,6 +1,6 @@
 import { GoogleGenAI } from "@google/genai";
 import type { ZodType } from "zod";
-import { FROZEN_GENERATION, SYSTEM_PROMPT_VERSION } from "@/lib/schemas/limits";
+import { DEFAULT_GEMINI_MODEL, FROZEN_GENERATION, SYSTEM_PROMPT_VERSION } from "@/lib/schemas/limits";
 import { AppError } from "@/lib/providers/errors";
 import { timeoutSignal } from "@/lib/providers/retry";
 import type { TaskSpec } from "@/lib/schemas/api";
@@ -10,8 +10,8 @@ export type GeminiProvenance = {
   model: string;
   requestedModel: string;
   systemPromptVersion: string;
-  temperature: number;
-  topP: number;
+  temperature: number | null;
+  topP: number | null;
   latencyMs: number;
   usage: {
     promptTokenCount: number | null;
@@ -67,7 +67,12 @@ export const repairJsonSchema = {
 };
 
 function requiredModel(): string {
-  return process.env.GEMINI_MODEL?.trim() || "gemini-2.5-flash";
+  return process.env.GEMINI_MODEL?.trim() || DEFAULT_GEMINI_MODEL;
+}
+
+function samplingFor(model: string): { temperature: number; topP: number } | null {
+  if (model.startsWith("gemini-3")) return null;
+  return { temperature: FROZEN_GENERATION.temperature, topP: FROZEN_GENERATION.topP };
 }
 
 function requiredKey(): string {
@@ -187,6 +192,7 @@ export async function generateStructured<T>(input: {
   signal?: AbortSignal;
 }): Promise<{ data: T; provenance: GeminiProvenance }> {
   const model = requiredModel();
+  const sampling = samplingFor(model);
   const key = requiredKey();
   const client = new GoogleGenAI({ apiKey: key });
   const started = Date.now();
@@ -200,8 +206,7 @@ export async function generateStructured<T>(input: {
       contents: input.prompt,
       config: {
         systemInstruction: SYSTEM_INSTRUCTION,
-        temperature: FROZEN_GENERATION.temperature,
-        topP: FROZEN_GENERATION.topP,
+        ...(sampling ?? {}),
         responseMimeType: "application/json",
         responseJsonSchema: input.jsonSchema,
         abortSignal: timed.signal,
@@ -256,8 +261,8 @@ export async function generateStructured<T>(input: {
         model: reported,
         requestedModel: model,
         systemPromptVersion: SYSTEM_PROMPT_VERSION,
-        temperature: FROZEN_GENERATION.temperature,
-        topP: FROZEN_GENERATION.topP,
+        temperature: sampling?.temperature ?? null,
+        topP: sampling?.topP ?? null,
         latencyMs: Date.now() - started,
         usage: {
           promptTokenCount: response.usageMetadata?.promptTokenCount ?? null,

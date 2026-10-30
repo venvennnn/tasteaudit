@@ -9,7 +9,7 @@ async function main() {
   const qlooKey = configured("QLOO_API_KEY");
   const qlooBase = configured("QLOO_BASE_URL") ?? "https://hackathon.api.qloo.com";
   const geminiKey = configured("GEMINI_API_KEY");
-  const model = configured("GEMINI_MODEL") ?? "gemini-2.5-flash";
+  const model = configured("GEMINI_MODEL") ?? "gemini-3.8-flash";
   if (!qlooKey || !geminiKey) {
     console.log("Live provider checks skipped: QLOO_API_KEY or GEMINI_API_KEY is not set.");
     if (process.env.SMOKE_REQUIRED === "1") process.exit(2);
