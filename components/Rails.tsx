@@ -1,5 +1,6 @@
 "use client";
 
+import { Cover } from "@/components/Cover";
 import Link from "next/link";
 import { useSession } from "@/components/SessionProvider";
 import type { Favorite } from "@/lib/session/state";
@@ -20,13 +21,6 @@ function Icon({ name }: { name: "doc" | "gear" | "people" | "db" | "search" | "m
     </svg>
   );
 }
-
-const KIND_ICON: Record<Favorite["kind"], "film" | "music" | "book" | "search"> = {
-  movie: "film",
-  artist: "music",
-  book: "book",
-  any: "search",
-};
 
 const KIND_LABEL: Record<Favorite["kind"], string> = {
   movie: "Film",
@@ -102,7 +96,13 @@ export function WhoRail() {
       <ul className="rail-list">
         {interests.length === 0 ? <RailItem icon="search" title="No interests yet" detail="Add a few to ground the brief." /> : null}
         {interests.map((favorite) => (
-          <RailItem key={`${favorite.kind}-${favorite.name}`} icon={KIND_ICON[favorite.kind]} title={KIND_LABEL[favorite.kind]} detail={favorite.name} />
+          <li key={`${favorite.kind}-${favorite.name}`}>
+            <Cover name={favorite.name} kind={favorite.kind} />
+            <div>
+              <strong>{KIND_LABEL[favorite.kind]}</strong>
+              <span>{favorite.name}</span>
+            </div>
+          </li>
         ))}
       </ul>
       <div className="rail-foot">
