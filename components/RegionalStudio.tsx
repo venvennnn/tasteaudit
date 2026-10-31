@@ -175,7 +175,15 @@ export function RegionalStudio() {
         <button type="submit" className="btn" data-testid="run-regional" disabled={!canRun}>Run regional comparison</button>
         {regional.running ? <p>Running. Each city finishes on its own. A failed city can be retried without repeating the others.</p> : null}
       </form>
-      <RegionalResults regional={regional} onRetry={(city) => void runRegional([city], false)} onDownload={downloadRegional} />
+      <RegionalResults
+        regional={regional}
+        onRetry={(city) => void runRegional([city], false)}
+        onRetryFailed={() => {
+          const names = Object.values(regional.cases).filter((item) => item.phase === "failed").map((item) => item.city);
+          if (names.length > 0) void runRegional(names, false);
+        }}
+        onDownload={downloadRegional}
+      />
     </Frame>
   );
 }
