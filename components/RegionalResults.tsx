@@ -14,10 +14,12 @@ const EMPTY_EXPLAIN: Explainability = { status: "unavailable", contributions: []
 export function RegionalResults({
   regional,
   onRetry,
+  onRetryFailed,
   onDownload,
 }: {
   regional: RegionalState;
   onRetry: (city: string) => void;
+  onRetryFailed?: () => void;
   onDownload: (kind: "json" | "csv") => void;
 }) {
   const rows = Object.values(regional.cases);
@@ -37,6 +39,7 @@ export function RegionalResults({
             <h2>City overview</h2>
             <p>Original and revised affinity are both Qloo scores for that city’s own evidence. Compare them inside the city. The dots are not a ranking of cities.</p>
           </div>
+          {failed && onRetryFailed ? <button type="button" className="btn" onClick={onRetryFailed}>Retry failed cities</button> : null}
         </div>
         <div className="regional-table-wrap">
           <table className="regional-table" data-testid="regional-overview">
@@ -58,7 +61,10 @@ export function RegionalResults({
                 return (
                   <tr key={row.city} data-phase={row.phase}>
                     <td><button type="button" onClick={() => setPicked(row.city)}>{row.city}</button><small>{phaseText(row.phase)}</small></td>
-                    <td data-testid="regional-method">{row.methodLabel || "Waiting"}</td>
+                    <td data-testid="regional-method">
+                      {row.phase === "failed" ? (row.methodLabel || "Scoring did not finish.") : (row.methodLabel || "Waiting")}
+                      {row.phase === "failed" && row.error ? <small>{row.error}</small> : null}
+                    </td>
                     <td>{shown(row, row.originalMean)}</td>
                     <td>{shown(row, row.revisedMean)}</td>
                     <td>{row.phase === "complete" && change !== null ? formatSigned3(change) : "Unavailable"}</td>
@@ -120,6 +126,7 @@ export function RegionalResults({
         )}
         <p>{shared.length > 0 ? `Returned in every listed city: ${shared.map((tag) => tag.name).join(", ")}.` : "No tag was returned for every city in this run."}</p>
         <p>{distinctive.length > 0 ? `Returned for only one city: ${distinctive.map((tag) => `${tag.name} (${tag.distinctiveCity})`).join(", ")}.` : "No tag was unique to a single returned list."}</p>
+        {rows.some((row) => row.phase === "failed" && row.tags.length > 0) ? <p>A failed city still lists tags that were returned. Those tags were not used to score recommendations.</p> : null}
         {rows.map((row) => (
           <p key={`${row.city}-demo`} className="muted">{row.city}: {row.probe ? demographicLine(row) : row.methodLabel}</p>
         ))}
@@ -143,6 +150,7 @@ export function RegionalResults({
           <div>
             <h3>Qloo-assisted Gemini</h3>
             {current.revisedAnswer ? <p data-testid="regional-revised">{current.revisedAnswer}</p> : null}
+            {current.phase === "failed" && current.revised.length === 0 ? <p>Scoring did not finish, so no Qloo-assisted list was selected.</p> : null}
             {current.revised.map((item) => <ArmCard key={`${item.entityId}-${item.rank}`} item={item} domain={regional.domain} />)}
           </div>
         </div>
@@ -196,6 +204,9 @@ function WhatChanged({ city }: { city: RegionalCityResult }) {
   const removed = [...original.values()].filter((item) => !revised.has(item.entityId.toLowerCase()));
   const added = [...revised.values()].filter((item) => !original.has(item.entityId.toLowerCase()));
   const kept = [...revised.values()].filter((item) => original.has(item.entityId.toLowerCase()));
+  if (city.phase === "failed") {
+    return <p>{city.error || "This city did not finish."} {city.tags.length > 0 ? "Returned taste tags are listed above. They were not applied to a scored comparison." : ""}</p>;
+  }
   if (city.original.length === 0 && city.revised.length === 0) return <p>{city.methodLabel || "No comparison yet."}</p>;
   return (
     <div>
@@ -228,7 +239,7 @@ function demographicLine(row: RegionalCityResult): string {
     : probe.demographicApplied === "echoed"
       ? "The age band was echoed."
       : "An age band was sent and was not confirmed by the response.";
-  return `${age} Audience ids were not sent. ${probe.localityResolved ? "A locality echo came back." : "No locality echo came back."} ${probe.warnings[0] ?? ""}`;
+  return `${age} Audience ids were not sent. ${probe.localityResolved ? "A locality echo came back." : "No locality echo came back."}`;
 }
 
 function modeCopy(mode: EvidenceMode, regional: RegionalState): string {

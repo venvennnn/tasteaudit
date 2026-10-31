@@ -21,7 +21,6 @@ import { ENTITY_ID_PATTERN, LIMITS, searchTypesForDomain, searchTypesForKind, ty
 import type { TaskSpec } from "@/lib/schemas/api";
 import type { GeminiProvenance } from "@/lib/providers/gemini";
 import {
-  emptyRegionalCity,
   type ConfirmedMarket,
   type EvidenceMode,
   type RegionalArmItem,
@@ -247,28 +246,39 @@ export async function executeRegional(options: {
     const signal = options.signalFor?.(market.label) ?? options.signal;
     if (signal.aborted || (options.isCurrent && !options.isCurrent(market.label))) return;
     const destination = destinationQuery(regional, market);
+    const prior = regional.cases[market.label];
+    const resume = prior?.phase === "failed" && Boolean(prior.originalAnswer);
     const patch = (partial: Partial<RegionalCityResult>) => {
       if (options.isCurrent && !options.isCurrent(market.label)) return;
       options.onCase(market.label, partial);
     };
-    const base = emptyRegionalCity(market.label, market.query, destination, regional.evidence);
     if (regional.domain === "place" && regional.placeMode === "market" && !destination) {
-      patch({ ...base, phase: "failed", error: "Confirm a destination before a market comparison. No city was substituted." });
+      patch({ phase: "failed", error: "Confirm a destination before a market comparison. No city was substituted.", audienceMarket: market.query, destination, evidence: regional.evidence });
       return;
     }
-    const warnings = [DIRECT_REGIONAL_REASON, AUDIENCE_NOT_SENT, DERIVED_REGIONAL_REASON];
-    if (regional.evidence === "regional" && regional.interests.some((item) => item.name.trim())) {
+    const warnings = resume
+      ? (prior?.warnings ?? []).filter((warning) => warning !== prior?.error)
+      : [DIRECT_REGIONAL_REASON, AUDIENCE_NOT_SENT, DERIVED_REGIONAL_REASON];
+    if (!resume && regional.evidence === "regional" && regional.interests.some((item) => item.name.trim())) {
       warnings.push("Regional only mode did not send the listed interests.");
     }
-    let observedModel: string | null = null;
-    patch({ ...base, phase: "generating", warnings, noFavorites: regional.evidence === "regional" || interests.length === 0 });
+    let observedModel: string | null = prior?.observedModel ?? null;
+    let sawTags = Boolean(resume && prior && prior.tags.some((tag) => tag.compatible));
+    patch(resume
+      ? { phase: "discovering", error: null, warnings }
+      : { phase: "generating", error: null, warnings, noFavorites: regional.evidence === "regional" || interests.length === 0, audienceMarket: market.query, destination, evidence: regional.evidence, method: "unavailable", methodLabel: "" });
     try {
       const task = taskFor(regional, market, destination, interests, ageBand);
-      const original = await options.post<AnswerData>("/api/gemini/original", { task }, signal);
-      const provenance = original.provenance as Partial<GeminiProvenance>;
-      observedModel = typeof provenance.requestedModel === "string" ? provenance.requestedModel : null;
-      if (options.isCurrent && !options.isCurrent(market.label)) return;
-      patch({ originalAnswer: original.data.answer, observedModel, phase: "discovering" });
+      let originalAnswer = prior?.originalAnswer ?? null;
+      if (!originalAnswer) {
+        const original = await options.post<AnswerData>("/api/gemini/original", { task }, signal);
+        const provenance = original.provenance as Partial<GeminiProvenance>;
+        observedModel = typeof provenance.requestedModel === "string" ? provenance.requestedModel : null;
+        originalAnswer = original.data.answer;
+        if (options.isCurrent && !options.isCurrent(market.label)) return;
+        patch({ originalAnswer, observedModel, phase: "discovering" });
+      }
+      if (!originalAnswer) return;
 
       if (regional.evidence !== "regional" && interests.length === 0) {
         patch({
@@ -283,7 +293,17 @@ export async function executeRegional(options: {
         return;
       }
 
-      const extracted = await extractOriginal(options.post, signal, regional.domain, original.data.answer);
+      const extracted = resume && prior && prior.original.length > 0
+        ? prior.original.map((item) => ({
+            name: item.name,
+            entityId: item.entityId || null,
+            matchStatus: item.identity || "unmatched",
+            types: [] as string[],
+          }))
+        : await extractOriginal(options.post, signal, regional.domain, originalAnswer);
+      if (!(resume && prior && prior.original.length > 0)) {
+        patch({ original: namedOriginal(extracted) });
+      }
       if (regional.evidence === "interests") {
         await scoreInterestsOnly({
           post: options.post,
@@ -303,20 +323,45 @@ export async function executeRegional(options: {
       }
 
       const tasteKey = configurationHash(tasteParameters({ domain: regional.domain, locationQuery: market.query, ageBand, take: 15 }));
-      let pending = tasteCache.get(tasteKey);
-      if (!pending) {
-        pending = options.post<TasteData>("/api/qloo/taste", { domain: regional.domain, locationQuery: market.query, ageBand }, options.signal).then((response) => ({
-          data: response.data,
-          warnings: response.warnings,
-        }));
-        tasteCache.set(tasteKey, pending);
+      const reusableTags = resume && prior && prior.probe?.derivedStatus === "returned" && prior.tags.some((tag) => tag.compatible);
+      let tasteData: TasteData;
+      let tasteWarnings: string[] = [];
+      if (reusableTags && prior) {
+        tasteData = {
+          tags: prior.tags.map((tag) => ({
+            tagId: tag.tagId,
+            name: tag.name,
+            namespace: tag.namespace,
+            types: tag.types,
+            score: tag.score,
+            compatible: tag.compatible,
+            explainabilityStatus: "unavailable" as const,
+          })),
+          locality: prior.probe?.localityResolved ? { name: market.query, id: market.entityId } : null,
+          scoresNumeric: prior.probe?.scoresNumeric ?? false,
+          explainabilityReturned: prior.probe?.explainabilityReturned ?? false,
+          demographicEchoed: prior.probe?.demographicApplied === "echoed",
+          parameters: prior.probe?.parameters ?? [],
+        };
+      } else {
+        let pending = tasteCache.get(tasteKey);
+        if (!pending) {
+          pending = options.post<TasteData>("/api/qloo/taste", { domain: regional.domain, locationQuery: market.query, ageBand }, options.signal).then((response) => ({
+            data: response.data,
+            warnings: response.warnings,
+          }));
+          tasteCache.set(tasteKey, pending);
+        }
+        const taste = await pending;
+        tasteData = taste.data;
+        tasteWarnings = taste.warnings;
       }
-      const taste = await pending;
-      warnings.push(...taste.warnings);
-      const tags = tagRecords(taste.data.tags);
-      const compatible = taste.data.tags.filter((tag) => tag.compatible).slice(0, 12);
-      const probe = probeOf(taste.data, ageBand, warnings);
-      if (!taste.data.locality?.name && !taste.data.locality?.id && compatible.length > 0) {
+      warnings.push(...tasteWarnings);
+      const tags = tagRecords(tasteData.tags);
+      const compatible = tasteData.tags.filter((tag) => tag.compatible).slice(0, 12);
+      const probe = probeOf(tasteData, ageBand, warnings);
+      sawTags = compatible.length > 0;
+      if (!tasteData.locality?.name && !tasteData.locality?.id && compatible.length > 0 && !warnings.some((warning) => warning.startsWith("Locality echo"))) {
         warnings.push("Locality echo was not in the taste response. Compatible tags were still used and labelled as derived.");
       }
       if (compatible.length === 0) {
@@ -347,7 +392,7 @@ export async function executeRegional(options: {
         return;
       }
 
-      const dropped = taste.data.tags.filter((tag) => !tag.compatible);
+      const dropped = tasteData.tags.filter((tag) => !tag.compatible);
       if (dropped.length > 0) warnings.push(`${dropped.length} returned tag${dropped.length === 1 ? "" : "s"} were incompatible with ${regional.domain} and were not sent.`);
       const tagIds = compatible.map((tag) => tag.tagId);
       const seedIds = regional.evidence === "joint" ? interests.map((item) => item.entityId) : [];
@@ -444,7 +489,7 @@ export async function executeRegional(options: {
       const failure = failureOf(error);
       if (failure.code === "aborted") return;
       if (options.isCurrent && !options.isCurrent(market.label)) return;
-      patch({ phase: "failed", error: failure.message, warnings: [...warnings, failure.message], observedModel, completedAt: new Date().toISOString() });
+      patch({ phase: "failed", error: failure.message, methodLabel: sawTags ? "Derived tags returned. Scoring did not finish." : "Scoring did not finish.", warnings: [...warnings, failure.message], observedModel, completedAt: new Date().toISOString() });
     }
   });
 }
@@ -725,6 +770,20 @@ function parameterRows(parameters: Record<string, string>): { name: string; valu
 }
 
 type ExtractedPick = { name: string; entityId: string | null; matchStatus: string; types: string[] };
+
+function namedOriginal(extracted: ExtractedPick[]): RegionalArmItem[] {
+  return extracted.map((pick, index) => ({
+    entityId: pick.entityId ?? "",
+    name: pick.name,
+    affinity: null,
+    rank: index + 1,
+    membership: "original",
+    identity: pick.matchStatus,
+    explanation: "This name is from the original answer. It has not been scored yet.",
+    rankFrom: null,
+    practical: "Price, hours, and stock unverified",
+  }));
+}
 
 async function extractOriginal(post: Poster, signal: AbortSignal, domain: Domain, answer: string): Promise<ExtractedPick[]> {
   const response = await post<ExtractData>("/api/gemini/extract", { domain, answer, count: COUNT }, signal);
