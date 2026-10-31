@@ -1,3 +1,5 @@
+import type { SensitivityRun } from "@/lib/audit/sensitivity";
+import { emptyRegional, emptyRegionalCity, type RegionalCityResult, type RegionalState } from "@/lib/audit/regional-types";
 import type { SelectionDiff } from "@/lib/audit/select";
 import { configurationHash } from "@/lib/audit/hash";
 import type { CaseMetrics } from "@/lib/audit/metrics";
@@ -151,6 +153,8 @@ export type CaseRecord = {
   checksById: Record<string, ConstraintCheck[]>;
   recorded: RecordedMark | null;
   observedModel: string | null;
+  resolvedSeeds: ResolvedSeed[];
+  sensitivity: SensitivityRun | null;
 };
 
 export type VoteState = { choice: "a" | "b" | null; revealed: boolean };
@@ -190,6 +194,7 @@ export type SessionState = {
   votes: Record<string, VoteState>;
   configHash: string;
   resultsHash: string | null;
+  regional: RegionalState;
 };
 
 export type ConfigPatch = Partial<
@@ -258,6 +263,8 @@ export function emptyCase(city: string): CaseRecord {
     checksById: {},
     recorded: null,
     observedModel: null,
+    resolvedSeeds: [],
+    sensitivity: null,
   };
 }
 
@@ -342,6 +349,7 @@ export function createSession(): SessionState {
     votes: {},
     configHash: "",
     resultsHash: null,
+    regional: emptyRegional(),
   });
 }
 
@@ -371,7 +379,10 @@ export type Action =
   | { type: "compare" }
   | { type: "vote"; city: string; vote: VoteState }
   | { type: "record"; city: string; mark: RecordedMark }
-  | { type: "begin-run"; runId: string; cities: string[] };
+  | { type: "begin-run"; runId: string; cities: string[] }
+  | { type: "regional-replace"; regional: RegionalState }
+  | { type: "regional-case"; city: string; patch: Partial<RegionalCityResult> }
+  | { type: "regional-begin"; runId: string; startedAt: string; cities: string[] };
 
 export function reducer(state: SessionState, action: Action): SessionState {
   switch (action.type) {
@@ -448,6 +459,34 @@ export function reducer(state: SessionState, action: Action): SessionState {
         cases[name] = { ...emptyCase(name), phase: "queued" };
       }
       return { ...state, runId: action.runId, running: true, cities: action.cities, cases, resultsHash: state.configHash };
+    }
+    case "regional-replace":
+      return { ...state, regional: action.regional };
+    case "regional-case": {
+      const prev = state.regional.cases[action.city] ?? emptyRegionalCity(action.city, action.city, null, state.regional.evidence);
+      return {
+        ...state,
+        regional: {
+          ...state.regional,
+          cases: { ...state.regional.cases, [action.city]: { ...prev, ...action.patch, city: action.city } },
+        },
+      };
+    }
+    case "regional-begin": {
+      const cases: Record<string, RegionalCityResult> = {};
+      for (const city of action.cities) {
+        const market = state.regional.markets.find((item) => item.label.toLowerCase() === city.trim().toLowerCase());
+        const name = market?.label ?? city.trim();
+        if (!name) continue;
+        const destination = state.regional.domain === "place"
+          ? (state.regional.placeMode === "local" ? market?.query ?? name : state.regional.destination?.query ?? null)
+          : null;
+        cases[name] = emptyRegionalCity(name, market?.query ?? name, destination, state.regional.evidence);
+      }
+      return {
+        ...state,
+        regional: { ...state.regional, runId: action.runId, startedAt: action.startedAt, running: true, cases },
+      };
     }
     default:
       return state;
