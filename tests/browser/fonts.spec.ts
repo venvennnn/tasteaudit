@@ -19,5 +19,5 @@ test("loads the bundled font without Google Fonts", async ({ page }) => {
     }));
   });
   expect(loadedWeights).toEqual([true, true, true, true, true]);
-  await expect(page.getByRole("heading", { name: /Does your AI understand the market/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Same request/ })).toBeVisible();
 });
