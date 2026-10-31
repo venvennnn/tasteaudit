@@ -214,36 +214,41 @@ export function RegionalResults({
             </article>
           ))}
         </div>
-        {aligned.length === 0 ? <p>No regional tags were returned.</p> : (
-          <div className="fp-scroll">
-            <table className="regional-table">
-              <thead>
-                <tr>
-                  <th>Tag</th>
-                  <th>Namespace</th>
-                  {rows.map((row) => <th key={row.city}>{row.city}</th>)}
-                </tr>
-              </thead>
-              <tbody>
-                {aligned.map((tag) => (
-                  <tr key={tag.tagId}>
-                    <td>{tag.name}</td>
-                    <td>{tag.namespace}</td>
-                    {tag.cells.map((cell) => (
-                      <td key={cell.city}>{cell.status === "returned" ? `Rank ${cell.rank}${cell.compatible === false ? " · not sent" : ""}` : "Not returned"}</td>
+        <details className="rg-fold">
+          <summary>Full tag table and locality notes</summary>
+          <div>
+            {aligned.length === 0 ? <p>No regional tags were returned.</p> : (
+              <div className="fp-scroll">
+                <table className="regional-table">
+                  <thead>
+                    <tr>
+                      <th>Tag</th>
+                      <th>Namespace</th>
+                      {rows.map((row) => <th key={row.city}>{row.city}</th>)}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {aligned.map((tag) => (
+                      <tr key={tag.tagId}>
+                        <td>{tag.name}</td>
+                        <td>{tag.namespace}</td>
+                        {tag.cells.map((cell) => (
+                          <td key={cell.city}>{cell.status === "returned" ? `Rank ${cell.rank}${cell.compatible === false ? " · not sent" : ""}` : "Not returned"}</td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+                  </tbody>
+                </table>
+              </div>
+            )}
+            <p>{shared.length > 0 ? `Returned in every listed city: ${shared.map((tag) => tag.name).join(", ")}.` : "No tag was returned for every city in this run."}</p>
+            <p>{distinctive.length > 0 ? `Returned for only one city: ${distinctive.map((tag) => `${tag.name} (${tag.distinctiveCity})`).join(", ")}.` : "No tag was unique to a single returned list."}</p>
+            {rows.some((row) => row.phase === "failed" && row.tags.length > 0) ? <p>A failed city still lists tags that were returned. Those tags were not used to score recommendations.</p> : null}
+            {rows.map((row) => (
+              <p key={`${row.city}-demo`} className="muted">{row.city}: {row.probe ? demographicLine(row) : row.methodLabel}</p>
+            ))}
           </div>
-        )}
-        <p>{shared.length > 0 ? `Returned in every listed city: ${shared.map((tag) => tag.name).join(", ")}.` : "No tag was returned for every city in this run."}</p>
-        <p>{distinctive.length > 0 ? `Returned for only one city: ${distinctive.map((tag) => `${tag.name} (${tag.distinctiveCity})`).join(", ")}.` : "No tag was unique to a single returned list."}</p>
-        {rows.some((row) => row.phase === "failed" && row.tags.length > 0) ? <p>A failed city still lists tags that were returned. Those tags were not used to score recommendations.</p> : null}
-        {rows.map((row) => (
-          <p key={`${row.city}-demo`} className="muted">{row.city}: {row.probe ? demographicLine(row) : row.methodLabel}</p>
-        ))}
+        </details>
       </section>
 
       <section className="rg-card">
