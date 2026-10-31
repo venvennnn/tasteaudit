@@ -1088,6 +1088,10 @@ summary { cursor: pointer; font-weight: 700; }
 .rg-facts { display: none; list-style: none; margin: 0 0 12px; padding: 0; }
 .rg-facts li { display: flex; flex-direction: column; gap: 4px; border: 1px solid var(--line); border-radius: 12px; padding: 12px; background: #f8fafc; min-width: 0; }
 .rg-facts span, .rg-facts small { overflow-wrap: anywhere; }
+.rg-fold { margin-top: 4px; border: 1px solid var(--line); border-radius: 12px; background: #f8fafc; }
+.rg-fold summary { cursor: pointer; padding: 12px 14px; font-weight: 700; }
+.rg-fold summary:focus-visible { outline: 2px solid var(--blue); outline-offset: 2px; }
+.rg-fold > div { padding: 4px 14px 8px; }
 .rg-edit { margin-top: 18px; }
 .rg-edit summary { cursor: pointer; font-weight: 700; margin-bottom: 12px; }
 button.rg-pill, button.rg-track-row { font: inherit; color: inherit; cursor: pointer; }
