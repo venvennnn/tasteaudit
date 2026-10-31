@@ -89,6 +89,93 @@ describe("regional capabilities", () => {
     expect(cases.Chennai?.noFavorites).toBe(true);
   });
 
+  it("keeps returned tags when scoring times out and retries without rewriting the original", async () => {
+    const calls: string[] = [];
+    const regional = regionalBase();
+    const failed: RegionalCityResult = {
+      ...regional.cases.Chennai,
+      city: "Chennai",
+      audienceMarket: "Chennai",
+      destination: null,
+      evidence: "regional",
+      phase: "failed",
+      method: "derived",
+      methodLabel: "Derived from regional taste profile",
+      probe: {
+        derivedStatus: "returned",
+        localityResolved: false,
+        scoresNumeric: false,
+        explainabilityReturned: false,
+        demographicApplied: "not_sent",
+        audienceApplied: "not_sent",
+        compatibleTagCount: 1,
+        returnedTagCount: 1,
+        warnings: [],
+        parameters: [],
+      },
+      tags: [{ tagId: "urn:tag:genre:media:fantasy", name: "Fantasy", namespace: "urn:tag:genre:media", types: ["urn:entity:book"], score: null, rank: 1, compatible: true }],
+      originalAnswer: "Read The Hobbit.",
+      revisedAnswer: null,
+      original: [{ entityId: book, name: "The Hobbit", affinity: null, rank: 1, membership: "original", identity: "exact", explanation: "", rankFrom: null, practical: "Price, hours, and stock unverified" }],
+      revised: [],
+      scores: [],
+      pool: [],
+      replacements: 0,
+      originalCoverage: { numerator: 0, denominator: 0 },
+      revisedCoverage: { numerator: 0, denominator: 0 },
+      originalMean: null,
+      revisedMean: null,
+      limitation: null,
+      noFavorites: true,
+      error: "The provider timed out.",
+      requestKey: null,
+      scoreParameters: [],
+      warnings: ["The provider timed out."],
+      observedModel: "gemini-test",
+      completedAt: null,
+      sensitivity: null,
+    };
+    regional.cases = { Chennai: failed };
+    let insights = 0;
+    const post = async <T,>(path: string): Promise<{ data: T; warnings: string[]; provenance: Record<string, unknown> }> => {
+      calls.push(path);
+      if (path.endsWith("/regional-insights")) {
+        insights += 1;
+        if (insights === 1) throw { code: "timeout", message: "The provider timed out.", retryable: true, requestId: "t" };
+        return { data: { entities: [{ entityId: book, name: "The Hobbit", types: ["urn:entity:book"], affinity: 0.4, explainability: explain("unavailable"), language: null, tags: [], evidenceOrigin: "unsigned", envelope: null }], missingIds: [], parameters: [] } as T, warnings: [], provenance: {} };
+      }
+      if (path.endsWith("/repair")) return { data: { selections: [{ id: book, reason: "Kept." }], answer: "Revised: The Hobbit." } as T, warnings: [], provenance: { requestedModel: "gemini-test" } };
+      throw new Error(`unexpected ${path}`);
+    };
+    const cases: Record<string, Partial<RegionalCityResult>> = { Chennai: failed };
+    await executeRegional({
+      regional,
+      cities: ["Chennai"],
+      post,
+      signal: new AbortController().signal,
+      onCase: (city, patch) => {
+        cases[city] = { ...cases[city], ...patch };
+      },
+    });
+    expect(calls.some((path) => path.endsWith("/original") || path.endsWith("/taste"))).toBe(false);
+    expect(cases.Chennai?.phase).toBe("failed");
+    expect(cases.Chennai?.methodLabel).toBe("Derived tags returned. Scoring did not finish.");
+    expect(cases.Chennai?.tags?.[0]?.name).toBe("Fantasy");
+    expect(cases.Chennai?.originalAnswer).toBe("Read The Hobbit.");
+    regional.cases.Chennai = { ...failed, ...(cases.Chennai as RegionalCityResult), phase: "failed", originalAnswer: "Read The Hobbit." };
+    await executeRegional({
+      regional,
+      cities: ["Chennai"],
+      post,
+      signal: new AbortController().signal,
+      onCase: (city, patch) => {
+        cases[city] = { ...cases[city], ...patch };
+      },
+    });
+    expect(cases.Chennai?.phase).toBe("complete");
+    expect(cases.Chennai?.originalMean).toBeCloseTo(0.4);
+  });
+
   it("sends only compatible tags and scores originals with the alternatives", async () => {
     const seen: { path: string; body: Record<string, unknown> }[] = [];
     const post = async <T,>(path: string, body: unknown): Promise<{ data: T; warnings: string[]; provenance: Record<string, unknown> }> => {

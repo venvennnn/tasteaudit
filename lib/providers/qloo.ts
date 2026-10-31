@@ -90,6 +90,12 @@ function timeoutMs(): number {
   return Math.min(raw, 25_000);
 }
 
+function insightsTimeoutMs(): number {
+  const raw = Number(process.env.QLOO_INSIGHTS_TIMEOUT_MS ?? 25_000);
+  if (!Number.isFinite(raw) || raw < 1000) return 25_000;
+  return Math.min(raw, 55_000);
+}
+
 function asRecord(value: unknown): Record<string, unknown> | null {
   if (value && typeof value === "object" && !Array.isArray(value)) return value as Record<string, unknown>;
   return null;
@@ -262,6 +268,7 @@ async function qlooGet(
   parameters: Record<string, string>,
   stage: string,
   signal?: AbortSignal,
+  insights = false,
 ): Promise<{ payload: unknown; warnings: string[]; call: QlooCall; empty: boolean }> {
   const base = configuredBase();
   const key = apiKey();
@@ -271,52 +278,60 @@ async function qlooGet(
     if (value !== "") search.set(name, value);
   }
   url.search = search.toString();
-  const timed = timeoutSignal(timeoutMs(), signal);
-  try {
-    const response = await fetchWithRetry(
-      url.toString(),
-      {
-        method: "GET",
-        headers: {
-          Accept: "application/json",
-          "X-Api-Key": key,
+  const once = async () => {
+    const timed = timeoutSignal(insights ? insightsTimeoutMs() : timeoutMs(), signal);
+    try {
+      const response = await fetchWithRetry(
+        url.toString(),
+        {
+          method: "GET",
+          headers: {
+            Accept: "application/json",
+            "X-Api-Key": key,
+          },
         },
-      },
-      { stage, signal: timed.signal, retries: 2, softStatuses: [404] },
-    );
-    const text = await response.text();
-    let payload: unknown = null;
-    if (text) {
-      try {
-        payload = JSON.parse(text) as unknown;
-      } catch {
-        throw new AppError({
-          code: "upstream",
-          message: "The provider returned a response that was not JSON.",
-          stage,
-          retryable: true,
-          status: 502,
-        });
+        { stage, signal: timed.signal, retries: 2, softStatuses: [404] },
+      );
+      const text = await response.text();
+      let payload: unknown = null;
+      if (text) {
+        try {
+          payload = JSON.parse(text) as unknown;
+        } catch {
+          throw new AppError({
+            code: "upstream",
+            message: "The provider returned a response that was not JSON.",
+            stage,
+            retryable: true,
+            status: 502,
+          });
+        }
       }
+      const empty = response.status === 404 || entityArray(payload).length === 0;
+      const warnings = payloadWarnings(payload);
+      if (empty && !warnings.some((warning) => /no result/i.test(warning))) {
+        warnings.push(response.status === 404 ? "The provider found no results." : "The provider returned no entities.");
+      }
+      return {
+        payload,
+        warnings,
+        empty,
+        call: {
+          host: base.host,
+          path,
+          parameters,
+          retrievedAt: new Date().toISOString(),
+        },
+      };
+    } finally {
+      timed.cancel();
     }
-    const empty = response.status === 404 || entityArray(payload).length === 0;
-    const warnings = payloadWarnings(payload);
-    if (empty && !warnings.some((warning) => /no result/i.test(warning))) {
-      warnings.push(response.status === 404 ? "The provider found no results." : "The provider returned no entities.");
-    }
-    return {
-      payload,
-      warnings,
-      empty,
-      call: {
-        host: base.host,
-        path,
-        parameters,
-        retrievedAt: new Date().toISOString(),
-      },
-    };
-  } finally {
-    timed.cancel();
+  };
+  try {
+    return await once();
+  } catch (error) {
+    if (insights && error instanceof AppError && error.code === "timeout" && !signal?.aborted) return once();
+    throw error;
   }
 }
 
@@ -396,7 +411,7 @@ export async function discoverCandidates(input: {
     take: LIMITS.discoverTake,
   });
   const geographicSignalApplied = locationFilterApplied;
-  const result = await qlooGet("/v2/insights", parameters, "qloo.discover", input.signal);
+  const result = await qlooGet("/v2/insights", parameters, "qloo.discover", input.signal, true);
   const locality = parseLocality(result.payload);
   return {
     entities: entityArray(result.payload)
@@ -433,7 +448,7 @@ export async function scoreCandidates(input: {
     take: Math.min(50, input.candidateIds.length),
   });
   const geographicSignalApplied = locationFilterApplied;
-  const result = await qlooGet("/v2/insights", parameters, "qloo.score", input.signal);
+  const result = await qlooGet("/v2/insights", parameters, "qloo.score", input.signal, true);
   const entities = entityArray(result.payload)
     .map(normalizeEntity)
     .filter((entity): entity is QlooEntity => entity !== null && ENTITY_ID_PATTERN.test(entity.entityId));
@@ -612,7 +627,7 @@ export async function analyzeRegionalTaste(input: {
   demographicEchoed: boolean;
 }> {
   const parameters = tasteParameters(input);
-  const result = await qlooGet("/v2/insights", parameters, "qloo.taste", input.signal);
+  const result = await qlooGet("/v2/insights", parameters, "qloo.taste", input.signal, true);
   const tags = parseTasteTags(result.payload, input.domain);
   const warnings = result.warnings.filter((warning) => !/no entities/i.test(warning));
   if (tags.length === 0) warnings.push("The taste analysis returned no tags.");
@@ -646,9 +661,9 @@ export async function regionalInsights(input: {
 }> {
   const parameters = regionalEntityParameters({
     ...input,
-    take: input.candidateIds && input.candidateIds.length > 0 ? Math.min(50, input.candidateIds.length) : LIMITS.discoverTake,
+    take: input.candidateIds && input.candidateIds.length > 0 ? Math.min(50, input.candidateIds.length) : 12,
   });
-  const result = await qlooGet("/v2/insights", parameters, input.candidateIds?.length ? "qloo.regional.score" : "qloo.regional.discover", input.signal);
+  const result = await qlooGet("/v2/insights", parameters, input.candidateIds?.length ? "qloo.regional.score" : "qloo.regional.discover", input.signal, true);
   const entities = entityArray(result.payload)
     .map(normalizeEntity)
     .filter((entity): entity is QlooEntity => entity !== null && ENTITY_ID_PATTERN.test(entity.entityId));
