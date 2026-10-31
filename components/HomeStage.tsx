@@ -1,25 +1,26 @@
 "use client";
 
 import Link from "next/link";
+import { Cover } from "@/components/Cover";
 import { Frame } from "@/components/Frame";
 
 const PREVIEW = [
   {
     city: "Chennai",
     place: "India",
-    tone: "warm" as const,
+    books: ["The Priory of the Orange Tree", "The Name of the Wind", "Circe"],
     chips: ["Mythology", "Epic storytelling", "South Asian culture"],
   },
   {
     city: "Kuala Lumpur",
     place: "Malaysia",
-    tone: "teal" as const,
+    books: ["The Night Circus", "The Way of Kings", "The Hobbit"],
     chips: ["Multicultural themes", "Adventure", "Southeast Asian culture"],
   },
   {
     city: "London",
     place: "United Kingdom",
-    tone: "navy" as const,
+    books: ["The Lies of Locke Lamora", "The Fifth Season", "Good Omens"],
     chips: ["Classic fantasy", "World-building", "European literature"],
   },
 ];
@@ -41,10 +42,8 @@ export function HomeStage() {
               <div key={column.city}>
                 <strong>{column.city}</strong>
                 <small>{column.place}</small>
-                <div className="home-covers" aria-hidden="true">
-                  <Scene tone={column.tone} variant={0} />
-                  <Scene tone={column.tone} variant={1} />
-                  <Scene tone={column.tone} variant={2} />
+                <div className="home-covers">
+                  {column.books.map((book) => <Cover key={book} name={book} kind="book" />)}
                 </div>
                 <p className="home-evidence">Illustration</p>
                 <ul>
@@ -86,19 +85,6 @@ export function HomeStage() {
         <li><span><strong>Qloo and Gemini</strong>Scores come from Qloo. Gemini writes.</span></li>
       </ol>
     </Frame>
-  );
-}
-
-function Scene({ tone, variant }: { tone: "warm" | "teal" | "navy"; variant: number }) {
-  const sky = tone === "warm" ? ["#f4a261", "#e76f51"] : tone === "teal" ? ["#2a9d8f", "#1d4e89"] : ["#1e3a5f", "#0f172a"];
-  const shift = 12 * variant;
-  return (
-    <svg viewBox="0 0 64 88" className="home-scene">
-      <rect width="64" height="88" rx="6" fill={sky[variant % 2]} />
-      <circle cx={20 + shift} cy={24} r="7" fill="#fff6d8" opacity="0.9" />
-      <path d={`M6 70 L${22 + variant * 6} 42 L${40 + variant * 4} 70 Z`} fill="rgba(255,255,255,0.28)" />
-      <rect x="8" y="62" width="48" height="16" rx="2" fill="rgba(15,23,42,0.18)" />
-    </svg>
   );
 }
 

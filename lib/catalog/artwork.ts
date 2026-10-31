@@ -1,4 +1,4 @@
-import { choosePages, sanitizeImageUrl, titleScore, type ArtworkKind } from "@/lib/catalog/rank";
+import { artworkQuery, choosePages, sanitizeImageUrl, titleScore, type ArtworkKind } from "@/lib/catalog/rank";
 
 export type ArtworkHit = {
   name: string;
@@ -16,13 +16,14 @@ export async function lookupArtwork(input: {
   take: number;
   signal?: AbortSignal;
 }): Promise<ArtworkHit[]> {
-  const query = input.query.trim();
+  const query = artworkQuery(input.query);
   const take = Math.min(6, Math.max(1, input.take));
   if (query.length < 2) return [];
   const key = `${input.kind}:${query.toLowerCase()}:${take}`;
   const cached = cache.get(key);
   if (cached) return cached;
   const hits = await fetchHits(query, input.kind, take, input.signal);
+  if (hits.length === 0) return hits;
   cache.set(key, hits);
   if (cache.size > CACHE_LIMIT) {
     const oldest = cache.keys().next().value;
@@ -96,8 +97,18 @@ function cleanTitle(title: string): string {
 }
 
 async function openLibrary(query: string, take: number, signal?: AbortSignal): Promise<ArtworkHit[]> {
+  try {
+    const fromSearch = await openLibrarySearch(query, "q", take, signal);
+    if (fromSearch.length > 0) return fromSearch;
+    return await openLibrarySearch(query, "title", take, signal);
+  } catch {
+    return [];
+  }
+}
+
+async function openLibrarySearch(query: string, field: "q" | "title", take: number, signal?: AbortSignal): Promise<ArtworkHit[]> {
   const url = new URL("https://openlibrary.org/search.json");
-  url.searchParams.set("q", query);
+  url.searchParams.set(field, query);
   url.searchParams.set("limit", "8");
   url.searchParams.set("fields", "title,cover_i");
   const body = await readJson(url, signal);
@@ -151,7 +162,7 @@ function rankNamed(query: string, rows: Array<ArtworkHit | null>, take: number):
 }
 
 async function readJson(url: URL, signal?: AbortSignal): Promise<Record<string, unknown> | null> {
-  const timeout = AbortSignal.timeout(7000);
+  const timeout = AbortSignal.timeout(12_000);
   const response = await fetch(url, {
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,
     headers: { Accept: "application/json", "User-Agent": UA },

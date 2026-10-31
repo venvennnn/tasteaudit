@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { ArtworkHit } from "@/lib/catalog/artwork";
-import { titleScore, type ArtworkKind } from "@/lib/catalog/rank";
+import { artworkQuery, titleScore, type ArtworkKind } from "@/lib/catalog/rank";
 
 const cache = new Map<string, ArtworkHit[]>();
 
@@ -50,21 +50,20 @@ export function useArtwork(query: string, kind: ArtworkKind, take = 1) {
 }
 
 export function Cover({ name, kind, fill = false }: { name: string; kind: ArtworkKind; fill?: boolean }) {
-  const { hits, status } = useArtwork(name, kind, 1);
-  const [broken, setBroken] = useState(false);
-  const hit = hits[0];
-  const show = Boolean(hit && !broken);
+  const { hits, status } = useArtwork(artworkQuery(name), kind, 3);
+  const [skip, setSkip] = useState(0);
+  const hit = hits[skip];
   useEffect(() => {
-    setBroken(false);
-  }, [hit?.imageUrl]);
+    setSkip(0);
+  }, [name, kind]);
   return (
-    <span className={fill ? "cover-frame fill" : "cover-frame"} data-state={show ? "ready" : status}>
-      {show ? (
+    <span className={fill ? "cover-frame fill" : "cover-frame"} data-state={hit ? "ready" : status}>
+      {hit ? (
         // Remote catalog bytes stay on the publisher host. next/image would proxy them.
         // eslint-disable-next-line @next/next/no-img-element
-        <img className="cover" src={hit.imageUrl} alt="" onError={() => setBroken(true)} />
+        <img className="cover" src={hit.imageUrl} alt="" onError={() => setSkip((value) => value + 1)} />
       ) : null}
-      {status === "loading" && !show ? <span className="cover-bar" aria-hidden="true" /> : null}
+      {status === "loading" && !hit ? <span className="cover-bar" aria-hidden="true" /> : null}
     </span>
   );
 }
