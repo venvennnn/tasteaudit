@@ -1,3 +1,4 @@
+import { domainEntityUrn, tagCompatible } from "@/lib/audit/capabilities";
 import { AppError } from "@/lib/providers/errors";
 import { fetchWithRetry, timeoutSignal } from "@/lib/providers/retry";
 import { domainFilterType, ENTITY_ID_PATTERN, LIMITS, QLOO_HACKATHON_ORIGIN, type Domain } from "@/lib/schemas/limits";
@@ -501,4 +502,159 @@ export async function getEntityDetails(input: { entityIds: string[]; signal?: Ab
   } finally {
     timed.cancel();
   }
+}
+
+export type TasteTag = {
+  tagId: string;
+  name: string;
+  namespace: string;
+  types: string[];
+  score: number | null;
+  explainability: Explainability;
+  compatible: boolean;
+};
+
+function tagArray(payload: unknown): unknown[] {
+  const root = asRecord(payload);
+  const results = asRecord(root?.results);
+  if (results && Array.isArray(results.tags)) return results.tags;
+  return [];
+}
+
+export function parseTasteTags(payload: unknown, domain: Domain): TasteTag[] {
+  const tags: TasteTag[] = [];
+  tagArray(payload).forEach((item) => {
+    const record = asRecord(item);
+    if (!record) return;
+    const tagId = typeof record.tag_id === "string" ? record.tag_id : typeof record.id === "string" ? record.id : "";
+    const name = typeof record.name === "string" ? record.name : tagId;
+    if (!tagId || !name) return;
+    const types = Array.isArray(record.types) ? record.types.filter((type): type is string => typeof type === "string") : [];
+    const namespace = typeof record.subtype === "string" ? record.subtype : tagId.split(":").slice(0, 4).join(":");
+    const query = asRecord(record.query);
+    const score = query && typeof query.affinity === "number" && Number.isFinite(query.affinity) ? query.affinity : null;
+    tags.push({
+      tagId,
+      name,
+      namespace,
+      types,
+      score,
+      explainability: parseExplainability(query?.explainability),
+      compatible: tagCompatible(types, domain),
+    });
+  });
+  return tags;
+}
+
+export async function searchLocalities(input: { name: string; signal?: AbortSignal }): Promise<{
+  entities: { entityId: string; name: string; types: string[] }[];
+  warnings: string[];
+  call: QlooCall;
+}> {
+  const result = await qlooGet(
+    "/search",
+    { query: input.name, types: "urn:entity:locality", page: "1", take: String(LIMITS.searchTake), sort_by: "match" },
+    "qloo.locality",
+    input.signal,
+  );
+  const entities = entityArray(result.payload)
+    .map(normalizeEntity)
+    .filter((entity): entity is QlooEntity => entity !== null && entity.name.trim().length > 0)
+    .map((entity) => ({ entityId: entity.entityId, name: entity.name, types: entity.types }));
+  return { entities, warnings: result.warnings, call: result.call };
+}
+
+export function tasteParameters(input: { domain: Domain; locationQuery: string; ageBand?: string; take?: number }): Record<string, string> {
+  const parameters: Record<string, string> = {
+    "filter.type": "urn:tag",
+    "signal.location.query": input.locationQuery,
+    "filter.parents.types": domainEntityUrn(input.domain),
+    take: String(input.take ?? 15),
+  };
+  if (input.ageBand) parameters["signal.demographics.age"] = input.ageBand;
+  return parameters;
+}
+
+export function regionalEntityParameters(input: {
+  domain: Domain;
+  tagIds: string[];
+  seedIds?: string[];
+  candidateIds?: string[];
+  locationQuery?: string;
+  ageBand?: string;
+  take: number;
+}): Record<string, string> {
+  const parameters: Record<string, string> = {
+    "filter.type": domainFilterType(input.domain),
+    "signal.interests.tags": input.tagIds.join(","),
+    "feature.explainability": "true",
+    take: String(input.take),
+  };
+  if (input.seedIds && input.seedIds.length > 0) parameters["signal.interests.entities"] = input.seedIds.join(",");
+  if (input.candidateIds && input.candidateIds.length > 0) parameters["filter.results.entities"] = input.candidateIds.join(",");
+  if (input.domain === "place" && input.locationQuery) parameters["filter.location.query"] = input.locationQuery;
+  if (input.ageBand) parameters["signal.demographics.age"] = input.ageBand;
+  return parameters;
+}
+
+export async function analyzeRegionalTaste(input: {
+  domain: Domain;
+  locationQuery: string;
+  ageBand?: string;
+  signal?: AbortSignal;
+}): Promise<{
+  tags: TasteTag[];
+  locality: LocalityResolution | null;
+  warnings: string[];
+  call: QlooCall;
+  scoresNumeric: boolean;
+  explainabilityReturned: boolean;
+  demographicEchoed: boolean;
+}> {
+  const parameters = tasteParameters(input);
+  const result = await qlooGet("/v2/insights", parameters, "qloo.taste", input.signal);
+  const tags = parseTasteTags(result.payload, input.domain);
+  const warnings = result.warnings.filter((warning) => !/no entities/i.test(warning));
+  if (tags.length === 0) warnings.push("The taste analysis returned no tags.");
+  const text = JSON.stringify(result.payload ?? {});
+  return {
+    tags,
+    locality: parseLocality(result.payload),
+    warnings,
+    call: result.call,
+    scoresNumeric: tags.some((tag) => typeof tag.score === "number"),
+    explainabilityReturned: tags.some((tag) => tag.explainability.status === "available"),
+    demographicEchoed: Boolean(input.ageBand && text.includes(input.ageBand)),
+  };
+}
+
+export async function regionalInsights(input: {
+  domain: Domain;
+  tagIds: string[];
+  seedIds?: string[];
+  candidateIds?: string[];
+  locationQuery?: string;
+  ageBand?: string;
+  signal?: AbortSignal;
+}): Promise<{
+  entities: QlooEntity[];
+  warnings: string[];
+  call: QlooCall;
+  locality: LocalityResolution | null;
+  parameters: Record<string, string>;
+  missingIds: string[];
+}> {
+  const parameters = regionalEntityParameters({
+    ...input,
+    take: input.candidateIds && input.candidateIds.length > 0 ? Math.min(50, input.candidateIds.length) : LIMITS.discoverTake,
+  });
+  const result = await qlooGet("/v2/insights", parameters, input.candidateIds?.length ? "qloo.regional.score" : "qloo.regional.discover", input.signal);
+  const entities = entityArray(result.payload)
+    .map(normalizeEntity)
+    .filter((entity): entity is QlooEntity => entity !== null && ENTITY_ID_PATTERN.test(entity.entityId));
+  const returned = new Set(entities.map((entity) => entity.entityId.toLowerCase()));
+  const missingIds = (input.candidateIds ?? []).filter((id) => !returned.has(id.toLowerCase()));
+  const warnings = [...result.warnings];
+  if (missingIds.length > 0) warnings.push(`${missingIds.length} candidate${missingIds.length === 1 ? "" : "s"} came back without a score. Missing affinity is not treated as zero.`);
+  return { entities, warnings, call: result.call, locality: parseLocality(result.payload), parameters, missingIds };
 }

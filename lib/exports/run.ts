@@ -1,3 +1,4 @@
+import { sanitizeRegional } from "@/lib/audit/regional-types";
 import { geographyApplied } from "@/lib/audit/geography";
 import { formatAffinity3 } from "@/lib/audit/metrics";
 import { describeDiff } from "@/lib/audit/select";
@@ -192,6 +193,7 @@ export function importDocument(raw: unknown): { ok: true; state: SessionState } 
     running: false,
     comparison: session.comparison === "readers" ? "readers" : "cities",
     readers: Array.isArray(session.readers) ? session.readers : [],
+    regional: sanitizeRegional(session.regional),
     cases,
     runId: crypto.randomUUID(),
   });

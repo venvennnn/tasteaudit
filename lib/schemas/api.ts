@@ -36,6 +36,7 @@ export const taskSchema = z.object({
   assistantPurpose: z.string().trim().max(LIMITS.purpose),
   age: z.number().int().min(0).max(120).nullable(),
   city: z.string().trim().max(LIMITS.city),
+  destination: z.string().trim().max(LIMITS.city).optional(),
   country: z.string().trim().max(LIMITS.country),
   budget: z.string().trim().max(LIMITS.budget),
   currency: z.string().trim().max(LIMITS.currency),
@@ -76,6 +77,25 @@ export const repairRequestSchema = z.object({
   task: taskSchema,
   candidates: z.array(evidenceInputSchema).min(1).max(LIMITS.scorePoolMax),
   seedIds: z.array(uuidSchema).max(LIMITS.favorites),
+}).strict();
+
+export const localityRequestSchema = z.object({
+  name: z.string().trim().min(1).max(LIMITS.city),
+}).strict();
+
+export const tasteRequestSchema = z.object({
+  domain: z.enum(DOMAINS),
+  locationQuery: z.string().trim().min(1).max(LIMITS.city),
+  ageBand: z.enum(["24_and_younger", "25_to_29", "30_to_34", "35_to_44", "45_to_54", "55_and_older"]).optional(),
+}).strict();
+
+export const regionalInsightsRequestSchema = z.object({
+  domain: z.enum(DOMAINS),
+  tagIds: z.array(z.string().trim().min(3).max(180)).min(1).max(12),
+  seedIds: z.array(uuidSchema).max(LIMITS.favorites).optional(),
+  candidateIds: z.array(uuidSchema).max(LIMITS.scorePoolMax).optional(),
+  locationQuery: z.string().trim().max(LIMITS.city).optional(),
+  ageBand: z.enum(["24_and_younger", "25_to_29", "30_to_34", "35_to_44", "45_to_54", "55_and_older"]).optional(),
 }).strict();
 
 export type SearchRequest = z.infer<typeof searchRequestSchema>;

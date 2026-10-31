@@ -73,7 +73,7 @@ test.describe("acceptance", () => {
     });
 
     await page.goto("/");
-    await expect(page.getByRole("heading", { name: /Does it know the customer/ })).toBeVisible();
+    await expect(page.getByRole("heading", { name: /Does your AI understand the market/ })).toBeVisible();
     await expect(page.getByRole("link", { name: "TasteAudit" }).first()).toBeVisible();
     await page.getByTestId("cta-demo").click();
     await page.getByTestId("preset-concierge").click();

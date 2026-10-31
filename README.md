@@ -86,6 +86,8 @@ Qloo calls from the server:
 
 Affinity is not preference accuracy or a purchase probability. Missing affinity is not zero. Reranking does not change the mean of the same complete set. A shorter list is disclosed. A failed hard constraint is not overruled by a high affinity. Hours, price, edition, stock, and accessibility stay Unknown without independent evidence.
 
+Regional Audit sends `filter.type=urn:tag` with `signal.location.query` for taste analysis, then passes only tags whose types include the target entity URN through `signal.interests.tags`. Book and place entity scoring does not send `signal.location` or `signal.location.query`. If that derived evidence is missing, the comparison is not relabelled as global. Personalized runs can request `feature.explainability=true` and, on demand, rescore a fixed candidate pool with one interest removed.
+
 ## Checks recorded for this build
 
 Software tests were run in this workspace on 30 October 2026 (Asia/Calcutta evening, machine clock UTC):

@@ -2,7 +2,10 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { TasteFingerprint, type FingerprintColumn, type FingerprintInterest } from "@/components/Fingerprint";
 import { useSession } from "@/components/SessionProvider";
+import type { ArtworkKind } from "@/lib/catalog/rank";
+import type { Explainability } from "@/lib/providers/qloo";
 import { evidenceStatuses, priceEditionStockChecked, QLOO_AFFINITY_RETURNED } from "@/lib/audit/evidence";
 import { geographyNote, INTEREST_AFFINITY_NOTE } from "@/lib/audit/geography";
 import { affinityDelta, formatAffinity3, formatRatio, formatSigned3, meanObserved } from "@/lib/audit/metrics";
@@ -10,7 +13,7 @@ import { describeDiff, type SelectionDiff } from "@/lib/audit/select";
 import { activeCities, type CaseRecord, type CityPhase, type ScoreRow } from "@/lib/session/state";
 
 export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
-  const { state, compare, run, download, importText } = useSession();
+  const { state, compare, run, download, importText, runSensitivity } = useSession();
   const ordered = orderedCases(state.cases, activeCities(state));
   const [picked, setPicked] = useState("");
   if (ordered.length === 0) {
@@ -95,6 +98,7 @@ export function ResultsBody({ showEmpty = true }: { showEmpty?: boolean }) {
         <SameRequestNote cases={ordered} />
       </section>
       <CityCompare cases={ordered} domain={state.domain} city={selectedCity} unit={readers ? "reader" : "city"} />
+      <FingerprintBlock item={ordered.find((entry) => entry.city === selectedCity) ?? null} domain={state.domain} fallbackSeeds={state.seeds} onSensitivity={(city) => void runSensitivity(city)} />
       {rest.length >= 0 && state.assistantMode === "simulate" && !state.compareAll ? (
         <button type="button" className="text-btn" data-testid="compare-all" onClick={() => void compare()}>All four approaches</button>
       ) : null}
@@ -381,6 +385,55 @@ function EvidenceDialog({ item, entityId, onClose }: { item: CaseRecord; entityI
       <ul>{checks.map((check) => <li key={check.label}>{check.label}: {check.verdict}. {check.reason}</li>)}</ul>
       <button type="button" className="btn" onClick={onClose}>Close</button>
     </div>
+  );
+}
+
+const EMPTY_EXPLAIN: Explainability = { status: "unavailable", contributions: [], warning: null, raw: null };
+
+function FingerprintBlock({
+  item,
+  domain,
+  fallbackSeeds,
+  onSensitivity,
+}: {
+  item: CaseRecord | null;
+  domain: "book" | "place";
+  fallbackSeeds: { query: string; name: string | null; entityId: string | null; kind: FingerprintInterest["kind"] }[];
+  onSensitivity: (city: string) => void;
+}) {
+  if (!item || item.phase !== "complete") return null;
+  const seeds = item.resolvedSeeds.length > 0 ? item.resolvedSeeds : fallbackSeeds;
+  const interests: FingerprintInterest[] = seeds
+    .filter((seed) => (seed.name || seed.query).trim())
+    .map((seed) => ({ name: seed.name || seed.query, entityId: seed.entityId, kind: seed.kind === "any" ? (domain === "book" ? "book" : "any") : seed.kind }));
+  if (interests.length === 0) return null;
+  const columnKind: ArtworkKind = domain === "book" ? "book" : "any";
+  const diff = diffFor(item);
+  const toColumn = (name: string, entityId: string | null, membership: string, identity: string): FingerprintColumn | null => {
+    if (!entityId) return null;
+    const score = scoreFor(item, entityId);
+    return {
+      entityId,
+      name,
+      affinity: score?.affinity ?? null,
+      membership,
+      identity,
+      practical: "Price, edition and stock unverified",
+      explainability: score?.explainability ?? EMPTY_EXPLAIN,
+      kind: columnKind,
+    };
+  };
+  const original = item.extracted.map((pick) => toColumn(pick.name, pick.entityId, badgeFor(diff, pick.entityId, "original"), pick.matchStatus)).filter((row): row is FingerprintColumn => row !== null);
+  const revised = item.revisedSelections.map((pick) => toColumn(pick.name, pick.id, badgeFor(diff, pick.id, "revised"), "selected")).filter((row): row is FingerprintColumn => row !== null);
+  return (
+    <TasteFingerprint
+      interests={interests}
+      original={original}
+      revised={revised}
+      sensitivity={item.sensitivity}
+      sensitivitySupported={interests.filter((interest) => interest.entityId).length >= 2 && item.scores.length > 0}
+      onSensitivity={() => onSensitivity(item.city)}
+    />
   );
 }
 
