@@ -60,7 +60,7 @@ test("compares two confirmed cities without personal favorites", async ({ page }
   });
 
   await page.goto("/");
-  await expect(page.getByRole("heading", { name: /Does your AI understand the market/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Same request/ })).toBeVisible();
   await page.getByTestId("cta-regional").click();
   await expect(page.getByText("Compare the same request across markets using available regional cultural signals.")).toBeVisible();
   for (const city of ["Chennai", "London"]) {
