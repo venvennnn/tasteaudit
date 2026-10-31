@@ -7,7 +7,8 @@ import { useSession } from "@/components/SessionProvider";
 const LINKS = [
   { href: "/", label: "Overview", testId: "nav-overview" },
   { href: "/demo", label: "Guided Demo", testId: "nav-demo" },
-  { href: "/audit", label: "Company Audit", testId: "nav-audit" },
+  { href: "/regional", label: "Regional", testId: "nav-regional" },
+  { href: "/audit", label: "Personalized", testId: "nav-audit" },
   { href: "/results", label: "Results", testId: "nav-results-header" },
   { href: "/methodology", label: "Methodology", testId: "nav-methodology" },
 ];

@@ -345,7 +345,7 @@ export async function executeRun(options: {
       if (options.isCurrent && !options.isCurrent(city)) return;
       options.onCase(city, partial);
     };
-    patch({ phase: "generating" });
+    patch({ phase: "generating", resolvedSeeds: seeds });
     let current: StageName = "original";
     const warnings = [...existing.warnings];
     let observedModel = existing.observedModel;
