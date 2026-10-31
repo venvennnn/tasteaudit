@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import Link from "next/link";
+import { Cover } from "@/components/Cover";
 import { TasteFingerprint, type FingerprintColumn, type FingerprintInterest } from "@/components/Fingerprint";
 import { useSession } from "@/components/SessionProvider";
 import type { ArtworkKind } from "@/lib/catalog/rank";
@@ -356,7 +357,7 @@ function RecommendationCard({ item, name, entityId, badge, detail, openEvidence 
       {score?.imageUrl ? (
         // eslint-disable-next-line @next/next/no-img-element
         <img className="rec-thumb" src={score.imageUrl} alt="" />
-      ) : <span className="rec-thumb placeholder" aria-hidden="true" />}
+      ) : <Cover name={name} kind={state.domain === "book" ? "book" : "any"} />}
       <div>
         <strong>{name}</strong>
         <p>{category}</p>

@@ -1,11 +1,18 @@
 export type ArtworkKind = "movie" | "artist" | "book" | "any";
 
+export function artworkQuery(name: string): string {
+  const withoutSeries = name.replace(/\s+\([^)]*\)/g, " ").replace(/\s+/g, " ").trim();
+  const head = withoutSeries.split(/[:|–—]/)[0]?.trim() ?? withoutSeries;
+  return head.length >= 2 ? head : name.trim();
+}
+
 export function titleScore(query: string, title: string): number {
   const q = normalize(query);
   const t = normalize(title);
   if (!q || !t) return 9;
   if (t === q) return 0;
   if (t.startsWith(`${q} `)) return 1;
+  if (q.startsWith(`${t} `) && t.split(" ").length >= 2) return 1;
   if (t.includes(q)) return 2;
   return 5;
 }
