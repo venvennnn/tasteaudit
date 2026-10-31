@@ -80,6 +80,17 @@ export function RegionalStudio() {
       </section>
       <h1>What should your AI recommend differently across regions?</h1>
       <p className="lede">Compare the same request across markets using available regional cultural signals.</p>
+      <RegionalResults
+        regional={regional}
+        onRetry={(city) => void runRegional([city], false)}
+        onRetryFailed={() => {
+          const names = Object.values(regional.cases).filter((item) => item.phase === "failed").map((item) => item.city);
+          if (names.length > 0) void runRegional(names, false);
+        }}
+        onDownload={downloadRegional}
+      />
+      <details className="rg-edit" key={Object.keys(regional.cases).length > 0 ? "ran" : "fresh"} {...(Object.keys(regional.cases).length > 0 ? {} : { open: true })}>
+      <summary>Edit the request</summary>
       <form className="stack" onSubmit={(event) => { event.preventDefault(); if (canRun) void runRegional(); }}>
         <label>Assistant or company context
           <input value={regional.companyName} onChange={(event) => updateRegional({ companyName: event.target.value })} placeholder="A bookstore assistant" />
@@ -175,15 +186,7 @@ export function RegionalStudio() {
         <button type="submit" className="btn" data-testid="run-regional" disabled={!canRun}>Run regional comparison</button>
         {regional.running ? <p>Running. Each city finishes on its own. A failed city can be retried without repeating the others.</p> : null}
       </form>
-      <RegionalResults
-        regional={regional}
-        onRetry={(city) => void runRegional([city], false)}
-        onRetryFailed={() => {
-          const names = Object.values(regional.cases).filter((item) => item.phase === "failed").map((item) => item.city);
-          if (names.length > 0) void runRegional(names, false);
-        }}
-        onDownload={downloadRegional}
-      />
+      </details>
     </Frame>
   );
 }
